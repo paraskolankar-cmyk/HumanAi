@@ -44,11 +44,6 @@
     "typescript": "~5.8.2"
   },
   "overrides": {
-    "glob": "^11.0.1",
-    "prebuild-install": "0.0.0",
-    "node-domexception": "7.0.2"
-  },
-  "engines": {
-    "node": ">=20.0.0"
+    "glob": "^11.0.1"
   }
 }
