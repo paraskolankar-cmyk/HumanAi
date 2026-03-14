@@ -45,7 +45,10 @@
   },
   "overrides": {
     "glob": "^11.0.1",
-    "prebuild-install": "npm:empty-package",
-    "node-domexception": "npm:empty-package"
+    "prebuild-install": "0.0.0",
+    "node-domexception": "7.0.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
