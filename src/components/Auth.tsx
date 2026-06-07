@@ -8,7 +8,6 @@ import {
   ArrowRight, 
   Github, 
   Chrome,
-  MessageCircle,
   Sparkles,
   Phone
 } from 'lucide-react';
@@ -32,50 +31,77 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
   const handleTabSwitch = (loginFlag: boolean) => {
     setIsLogin(loginFlag);
     setError('');
+    setPassword('');
+    setConfirmPassword('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
+    // Password validation for Sign Up
     if (!isLogin && password !== confirmPassword) {
       setError("Passwords do not match!");
       return;
     }
 
     setIsLoading(true);
+    const normalizedEmail = email.trim().toLowerCase();
     
     try {
-      // Check if user exists on the server
-      const encodedEmail = encodeURIComponent(email.trim().toLowerCase());
-      const res = await fetch(`/api/user/${encodedEmail}`);
-      const userExists = res.ok;
-
       if (isLogin) {
-        // Log-in mode: must exist
-        if (!userExists) {
-          setError("This account does not exist. Please check your email or Sign Up.");
+        // --- SECURE LOGIN MODE ---
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password: password
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          // Backend agar error deta hai (wrong password ya user not found)
+          setError(data.message || "Invalid email or password.");
           setIsLoading(false);
           return;
         }
         
-        onLogin(email.trim().toLowerCase(), undefined, false);
+        // Success: Trigger login state
+        onLogin(normalizedEmail, data.name, false);
+
       } else {
-        // Sign-up mode: must NOT exist already
-        if (userExists) {
-          setError("An account with this email already exists. Please Sign In instead.");
+        // --- SECURE SIGN-UP MODE ---
+        const fullName = `${firstName} ${lastName}`.trim();
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password: password,
+            name: fullName,
+            mobile: mobile
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          // Backend agar bole ki user already exists ya validation fail ho
+          setError(data.message || "Registration failed. Please try again.");
           setIsLoading(false);
           return;
         }
 
-        // New user registration
+        // New user registration state clean-up
         localStorage.removeItem('humnai_assessment_completed');
         localStorage.removeItem('humnai_user_level');
         localStorage.removeItem('humnai_roadmap');
         localStorage.removeItem('humnai_completed_days');
         
-        const fullName = `${firstName} ${lastName}`.trim();
-        onLogin(email.trim().toLowerCase(), fullName, true, mobile);
+        onLogin(normalizedEmail, fullName, true, mobile);
       }
     } catch (err: any) {
       console.error("Auth error:", err);
@@ -99,12 +125,14 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
           <div className="p-8">
             <div className="flex gap-4 mb-8">
               <button 
+                type="button"
                 onClick={() => handleTabSwitch(true)}
                 className={`flex-1 pb-2 text-sm font-bold uppercase tracking-wider transition-colors ${isLogin ? 'text-[#4F46E5] dark:text-indigo-400 border-b-2 border-[#4F46E5] dark:border-indigo-400' : 'text-[#6B7280] dark:text-gray-500'}`}
               >
                 Sign In
               </button>
               <button 
+                type="button"
                 onClick={() => handleTabSwitch(false)}
                 className={`flex-1 pb-2 text-sm font-bold uppercase tracking-wider transition-colors ${!isLogin ? 'text-[#4F46E5] dark:text-indigo-400 border-b-2 border-[#4F46E5] dark:border-indigo-400' : 'text-[#6B7280] dark:text-gray-500'}`}
               >
@@ -116,7 +144,7 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
               <motion.div 
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-6 p-4 bg-red-55 border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-sm rounded-2xl flex items-center justify-center font-semibold text-center"
+                className="mb-6 p-4 border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-sm rounded-2xl flex items-center justify-center font-semibold text-center"
               >
                 {error}
               </motion.div>
@@ -264,11 +292,11 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <button className="flex items-center justify-center gap-2 py-3 border border-[#E5E7EB] dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium text-[#374151] dark:text-gray-300">
+              <button type="button" className="flex items-center justify-center gap-2 py-3 border border-[#E5E7EB] dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium text-[#374151] dark:text-gray-300">
                 <Chrome size={18} />
                 Google
               </button>
-              <button className="flex items-center justify-center gap-2 py-3 border border-[#E5E7EB] dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium text-[#374151] dark:text-gray-300">
+              <button type="button" className="flex items-center justify-center gap-2 py-3 border border-[#E5E7EB] dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium text-[#374151] dark:text-gray-300">
                 <Github size={18} />
                 GitHub
               </button>
@@ -279,6 +307,7 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
             <p className="text-sm text-[#6B7280] dark:text-gray-400">
               {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
               <button 
+                type="button"
                 onClick={() => handleTabSwitch(!isLogin)}
                 className="text-[#4F46E5] dark:text-indigo-400 font-bold hover:underline"
               >
