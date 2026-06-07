@@ -2,8 +2,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import { createServer as createHttpServer } from "http";
 import { Server } from "socket.io";
-import Database from "better-sqlite3";
 import path from "path";
+import fs from "fs";
 import Stripe from "stripe";
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -11,7 +11,238 @@ import helmet from "helmet";
 import cors from "cors";
 
 const dbPath = process.env.NODE_ENV === 'production' ? '/tmp/humanai.db' : 'humanai.db';
-const db = new Database(dbPath);
+
+// Fallback Pure JS SQLite mock engine for Serverless Vercel Node
+class PureJSStatement {
+  constructor(private sql: string, private db: any) {}
+  run(...args: any[]) { return this.db.executeRun(this.sql, args); }
+  get(...args: any[]) { return this.db.executeGet(this.sql, args); }
+  all(...args: any[]) { return this.db.executeAll(this.sql, args); }
+}
+
+class PureJSDB {
+  private filePath: string;
+  public data: any;
+
+  constructor(dbPath: string) {
+    this.filePath = dbPath.replace(/\.db$/, '.json');
+    this.data = {
+      users: [],
+      chat_messages: [],
+      payments: [],
+      plans: [],
+      modules: [],
+      lessons: [],
+      assessment_questions: []
+    };
+    this.load();
+  }
+
+  private load() {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        this.data = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
+      }
+    } catch (e: any) {
+      console.error("PureJSDB: Failed to load data from", this.filePath, e.message);
+    }
+  }
+
+  private save() {
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8');
+    } catch (e: any) {
+      console.error("PureJSDB: Failed to save data to", this.filePath, e.message);
+    }
+  }
+
+  exec(sql: string) {
+    return { success: true };
+  }
+
+  prepare(sql: string) {
+    return new PureJSStatement(sql, this);
+  }
+
+  private executeCount(sql: string) {
+    const match = sql.match(/SELECT\s+COUNT\(\*\)\s+as\s+count\s+FROM\s+(\w+)/i);
+    if (match) {
+      const table = match[1].toLowerCase();
+      const list = this.data[table] || [];
+      return { count: list.length };
+    }
+    return { count: 0 };
+  }
+
+  private executeSum(sql: string) {
+    const list = this.data.payments || [];
+    const total = list
+      .filter((p: any) => p.status === 'Success')
+      .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+    return { total };
+  }
+
+  public executeRun(sql: string, args: any[]) {
+    // 1. INSERT INTO
+    const insertMatch = sql.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
+    if (insertMatch) {
+      const table = insertMatch[1].toLowerCase();
+      const colStr = insertMatch[2];
+      const columns = colStr.split(',').map(c => c.trim().toLowerCase());
+      
+      const record: Record<string, any> = {};
+      if (['users', 'chat_messages', 'payments', 'assessment_questions'].includes(table)) {
+        const list = this.data[table] || [];
+        const maxId = list.reduce((max: number, item: any) => (item.id && item.id > max) ? item.id : max, 0);
+        record.id = maxId + 1;
+      }
+      
+      columns.forEach((col, idx) => {
+        record[col] = args[idx];
+      });
+      
+      if (!this.data[table]) {
+        this.data[table] = [];
+      }
+      this.data[table].push(record);
+      this.save();
+      return { changes: 1, lastInsertRowid: record.id || 0 };
+    }
+
+    // 2. UPDATE
+    const updateMatch = sql.match(/UPDATE\s+(\w+)\s+SET\s+(.*?)\s+WHERE\s+(\w+)\s*=\s*\?/i);
+    if (updateMatch) {
+      const table = updateMatch[1].toLowerCase();
+      const setClause = updateMatch[2];
+      const whereKey = updateMatch[3].toLowerCase();
+      
+      const setCols = setClause.split(',').map(s => s.split('=')[0].trim().toLowerCase());
+      const whereVal = args[args.length - 1];
+      
+      const list = this.data[table] || [];
+      let changes = 0;
+      
+      list.forEach((item: any) => {
+        const itemWhereVal = item[whereKey] !== undefined ? item[whereKey] : item[whereKey === 'user_email' ? 'user_email' : whereKey];
+        if (String(itemWhereVal) === String(whereVal)) {
+          setCols.forEach((col, idx) => {
+            item[col] = args[idx];
+          });
+          changes++;
+        }
+      });
+      
+      if (changes > 0) {
+        this.save();
+      }
+      return { changes };
+    }
+
+    // 3. DELETE
+    const deleteMatch = sql.match(/DELETE\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*\?/i);
+    if (deleteMatch) {
+      const table = deleteMatch[1].toLowerCase();
+      const key = deleteMatch[2].toLowerCase();
+      const val = args[0];
+      
+      const originalLength = (this.data[table] || []).length;
+      if (this.data[table]) {
+        this.data[table] = this.data[table].filter((item: any) => {
+          const itemVal = item[key] !== undefined ? item[key] : item[key === 'user_email' ? 'user_email' : key];
+          return String(itemVal) !== String(val);
+        });
+      }
+      
+      const changes = originalLength - (this.data[table] || []).length;
+      if (changes > 0) {
+        this.save();
+      }
+      return { changes };
+    }
+
+    return { changes: 0 };
+  }
+
+  public executeGet(sql: string, args: any[]) {
+    if (sql.includes("COUNT(*)")) {
+      return this.executeCount(sql);
+    }
+    if (sql.includes("SUM(amount)")) {
+      return this.executeSum(sql);
+    }
+    const results = this.executeAll(sql, args);
+    return results && results.length > 0 ? results[0] : null;
+  }
+
+  public executeAll(sql: string, args: any[]) {
+    if (sql.includes("PRAGMA table_info")) {
+      return [
+        { name: 'id' },
+        { name: 'name' },
+        { name: 'email' },
+        { name: 'mobile' },
+        { name: 'level' },
+        { name: 'is_pro' },
+        { name: 'is_admin' },
+        { name: 'progress_json' },
+        { name: 'onboarding_json' }
+      ];
+    }
+
+    // 1. SELECT * FROM <table> WHERE <key> = ?
+    const matchWithWhere = sql.match(/SELECT\s+.*?\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*\?/i);
+    if (matchWithWhere) {
+      const table = matchWithWhere[1].toLowerCase();
+      const key = matchWithWhere[2].toLowerCase();
+      const val = args[0];
+      let list = this.data[table] || [];
+      
+      list = list.filter((item: any) => {
+        const itemVal = item[key] !== undefined ? item[key] : item[key === 'user_email' ? 'user_email' : key];
+        return String(itemVal) === String(val);
+      });
+      return list;
+    }
+
+    // 2. JOIN query in stats
+    if (sql.includes("JOIN users")) {
+      const list = this.data.payments || [];
+      return list.map((p: any) => {
+        const u = (this.data.users || []).find((user: any) => user.id === p.user_id);
+        return {
+          ...p,
+          user_name: u ? u.name : 'Anonymous'
+        };
+      });
+    }
+
+    // 3. SELECT * FROM <table>
+    const matchAll = sql.match(/SELECT\s+.*?\s+FROM\s+(\w+)/i);
+    if (matchAll) {
+      const table = matchAll[1].toLowerCase();
+      return this.data[table] || [];
+    }
+
+    return [];
+  }
+}
+
+let db: any;
+try {
+  if (process.env.VERCEL === "1" || process.env.NOW_REGION) {
+    throw new Error("Serverless environment detected, bypassing better-sqlite3 dynamic load");
+  }
+  const { default: DatabaseClass } = await import("better-sqlite3");
+  db = new DatabaseClass(dbPath);
+  console.log("better-sqlite3 initialized successfully");
+} catch (e: any) {
+  console.warn("Using PureJS fallback database layer because:", e.message);
+  db = new PureJSDB(dbPath);
+}
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET 
   ? new Razorpay({
@@ -29,6 +260,7 @@ db.exec(`
     mobile TEXT,
     level TEXT DEFAULT 'Beginner',
     is_pro INTEGER DEFAULT 0,
+    is_admin INTEGER DEFAULT 0,
     progress_json TEXT,
     onboarding_json TEXT
   );
@@ -44,6 +276,10 @@ try {
   const hasMobile = tableInfo.some(col => col.name === 'mobile');
   if (!hasMobile) {
     db.exec("ALTER TABLE users ADD COLUMN mobile TEXT");
+  }
+  const hasAdmin = tableInfo.some(col => col.name === 'is_admin');
+  if (!hasAdmin) {
+    db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0");
   }
 } catch (e) {
   console.error("Migration failed", e);
@@ -429,9 +665,23 @@ app.get("/api/user/progress", (req, res) => {
     res.json({ success: true });
   });
 
+  app.post("/api/admin/users/update-admin", (req, res) => {
+    const { id, is_admin } = req.body;
+    db.prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(is_admin ? 1 : 0, id);
+    res.json({ success: true });
+  });
+
   app.post("/api/admin/users/update", (req, res) => {
-    const { id, name, email, mobile, level } = req.body;
-    db.prepare("UPDATE users SET name = ?, email = ?, mobile = ?, level = ? WHERE id = ?").run(name, email, mobile, level, id);
+    const { id, name, email, mobile, level, is_pro, is_admin } = req.body;
+    db.prepare("UPDATE users SET name = ?, email = ?, mobile = ?, level = ?, is_pro = ?, is_admin = ? WHERE id = ?").run(
+      name,
+      email,
+      mobile,
+      level,
+      is_pro !== undefined ? (is_pro ? 1 : 0) : 0,
+      is_admin !== undefined ? (is_admin ? 1 : 0) : 0,
+      id
+    );
     res.json({ success: true });
   });
 
