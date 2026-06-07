@@ -19,7 +19,7 @@ interface AuthProps {
 }
 
 export default function Auth({ onLogin, isDarkMode }: AuthProps) {
-  const [isLogin, setIsLogin] = useState(true);
+  const [isLogin, setIsLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -27,22 +27,47 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleTabSwitch = (loginFlag: boolean) => {
+    setIsLogin(loginFlag);
+    setError('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     
     if (!isLogin && password !== confirmPassword) {
-      alert("Passwords do not match!");
+      setError("Passwords do not match!");
       return;
     }
 
     setIsLoading(true);
     
-    // Mock authentication
-    setTimeout(() => {
-      setIsLoading(false);
-      
-      if (!isLogin) {
+    try {
+      // Check if user exists on the server
+      const encodedEmail = encodeURIComponent(email.trim().toLowerCase());
+      const res = await fetch(`/api/user/${encodedEmail}`);
+      const userExists = res.ok;
+
+      if (isLogin) {
+        // Log-in mode: must exist
+        if (!userExists) {
+          setError("This account does not exist. Please check your email or Sign Up.");
+          setIsLoading(false);
+          return;
+        }
+        
+        onLogin(email.trim().toLowerCase(), undefined, false);
+      } else {
+        // Sign-up mode: must NOT exist already
+        if (userExists) {
+          setError("An account with this email already exists. Please Sign In instead.");
+          setIsLoading(false);
+          return;
+        }
+
         // New user registration
         localStorage.removeItem('humnai_assessment_completed');
         localStorage.removeItem('humnai_user_level');
@@ -50,11 +75,14 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
         localStorage.removeItem('humnai_completed_days');
         
         const fullName = `${firstName} ${lastName}`.trim();
-        onLogin(email, fullName, true, mobile);
-      } else {
-        onLogin(email, undefined, false);
+        onLogin(email.trim().toLowerCase(), fullName, true, mobile);
       }
-    }, 1500);
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      setError("An error occurred during authentication. Please check your internet connection.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -71,18 +99,28 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
           <div className="p-8">
             <div className="flex gap-4 mb-8">
               <button 
-                onClick={() => setIsLogin(true)}
+                onClick={() => handleTabSwitch(true)}
                 className={`flex-1 pb-2 text-sm font-bold uppercase tracking-wider transition-colors ${isLogin ? 'text-[#4F46E5] dark:text-indigo-400 border-b-2 border-[#4F46E5] dark:border-indigo-400' : 'text-[#6B7280] dark:text-gray-500'}`}
               >
                 Sign In
               </button>
               <button 
-                onClick={() => setIsLogin(false)}
+                onClick={() => handleTabSwitch(false)}
                 className={`flex-1 pb-2 text-sm font-bold uppercase tracking-wider transition-colors ${!isLogin ? 'text-[#4F46E5] dark:text-indigo-400 border-b-2 border-[#4F46E5] dark:border-indigo-400' : 'text-[#6B7280] dark:text-gray-500'}`}
               >
                 Sign Up
               </button>
             </div>
+
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 p-4 bg-red-55 border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-sm rounded-2xl flex items-center justify-center font-semibold text-center"
+              >
+                {error}
+              </motion.div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <AnimatePresence mode="wait">
@@ -241,7 +279,7 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
             <p className="text-sm text-[#6B7280] dark:text-gray-400">
               {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
               <button 
-                onClick={() => setIsLogin(!isLogin)}
+                onClick={() => handleTabSwitch(!isLogin)}
                 className="text-[#4F46E5] dark:text-indigo-400 font-bold hover:underline"
               >
                 {isLogin ? 'Sign Up' : 'Sign In'}
