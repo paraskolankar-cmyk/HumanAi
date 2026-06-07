@@ -1,5 +1,6 @@
 {
   "name": "HumnAi - AI English Tutor",
   "description": "A comprehensive AI-powered English learning platform with real-time conversation, personalized learning plans, and interactive practice modules.",
-  "requestFramePermissions": ["camera", "microphone"]
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
