@@ -44,7 +44,7 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
   const [storedPassword, setStoredPassword] = useState(() => {
     return localStorage.getItem('humnai_admin_password') || 'admin123';
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'users' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'users' | 'admin-group' | 'settings'>('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [plans, setPlans] = useState<any[]>([]);
@@ -62,6 +62,7 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
   const [users, setUsers] = useState<any[]>([]);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editingPlanModal, setEditingPlanModal] = useState<any>(null);
+  const [selectedNewAdminId, setSelectedNewAdminId] = useState<number | ''>('');
 
   useEffect(() => {
     if (isAdmin) {
@@ -353,22 +354,35 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
     setUsers(users.map(u => u.id === id ? { ...u, is_pro: !currentPro ? 1 : 0 } : u));
   };
 
+  const handleToggleAdmin = async (id: number, currentAdmin: boolean) => {
+    await fetch('/api/admin/users/update-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, is_admin: !currentAdmin })
+    });
+    setUsers(users.map(u => u.id === id ? { ...u, is_admin: !currentAdmin ? 1 : 0 } : u));
+  };
+
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
+    const isPro = formData.get('is_pro') ? 1 : 0;
+    const isAdmin = editingUser.is_admin ? 1 : 0;
     const data = {
       id: editingUser.id,
       name: formData.get('name'),
       email: formData.get('email'),
       mobile: formData.get('mobile'),
-      level: formData.get('level')
+      level: formData.get('level'),
+      is_pro: isPro,
+      is_admin: isAdmin
     };
     await fetch('/api/admin/users/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    setUsers(users.map(u => u.id === data.id ? { ...u, ...data } : u));
+    setUsers(users.map(u => u.id === data.id ? { ...u, ...data, is_pro: isPro, is_admin: isAdmin } : u));
     setEditingUser(null);
   };
 
@@ -470,6 +484,7 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
           { id: 'dashboard', label: 'Overview', icon: Activity },
           { id: 'content', label: 'Content', icon: BookOpen },
           { id: 'users', label: 'Users', icon: Users },
+          { id: 'admin-group', label: 'Admin Group', icon: ShieldCheck },
           { id: 'settings', label: 'Settings', icon: ShieldCheck },
         ].map((tab) => (
           <button
@@ -587,13 +602,10 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
           {/* Plan Management */}
           <div className="bg-white dark:bg-[#1F2937] p-8 rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-[#111827] dark:text-white">Plan Management</h3>
-              <button 
-                onClick={() => setEditingPlanModal({ id: '', name: '', price: 0, interval: 'month' })}
-                className="px-4 py-2 bg-[#111827] dark:bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-black dark:hover:bg-indigo-700 transition-all"
-              >
-                + Add Plan
-              </button>
+              <div>
+                <h3 className="text-xl font-bold text-[#111827] dark:text-white">Plan Management</h3>
+                <p className="text-xs text-gray-500 mt-1">Pricing tiers available for the courses.</p>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {plans.map((plan) => (
@@ -622,13 +634,10 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
           {/* Content Management */}
           <div className="bg-white dark:bg-[#1F2937] p-8 rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-[#111827] dark:text-white">App Content Management</h3>
-              <button 
-                onClick={() => setEditingModule({ title: '', description: '' })}
-                className="px-4 py-2 bg-[#111827] dark:bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-black dark:hover:bg-indigo-700 transition-all"
-              >
-                + Add Module
-              </button>
+              <div>
+                <h3 className="text-xl font-bold text-[#111827] dark:text-white">App Content Management</h3>
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mt-1">⚠️ Restricted View: Only course rates & lesson time limits can be modified.</p>
+              </div>
             </div>
             
             <div className="space-y-8">
@@ -642,25 +651,12 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                         <span className="font-bold text-[#111827] dark:text-white">{module.title}</span>
                         <div className="flex gap-2">
                           <button 
-                            onClick={() => setEditingModule(module)}
-                            className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg"
-                            title="Edit Module"
-                          >
-                            <Activity size={16} />
-                          </button>
-                          <button 
                             onClick={() => setSelectedModuleId(module.id)}
-                            className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg"
+                            className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg flex items-center gap-1 text-xs font-bold border border-emerald-100 dark:border-emerald-950/40 px-2.5 py-1"
                             title="View Lessons"
                           >
-                            <BookOpen size={16} />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteModule(module.id)}
-                            className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                            title="Delete Module"
-                          >
-                            <Trash2 size={16} />
+                            <BookOpen size={14} />
+                            View Lessons
                           </button>
                         </div>
                       </div>
@@ -683,12 +679,6 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                     </h4>
                     <div className="flex items-center gap-3">
                       <button 
-                        onClick={() => setEditingLesson({ title: '', duration: '', content: [] })}
-                        className="px-3 py-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/30"
-                      >
-                        + Add Lesson
-                      </button>
-                      <button 
                         onClick={() => setSelectedModuleId(null)}
                         className="text-xs font-bold text-red-600 dark:text-red-400 hover:underline"
                       >
@@ -701,20 +691,14 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                       <div key={lesson.id} className="p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 flex items-center justify-between">
                         <div>
                           <p className="font-bold text-[#111827] dark:text-white">{lesson.title}</p>
-                          <p className="text-xs text-[#6B7280] dark:text-gray-500">{lesson.duration}</p>
+                          <p className="text-xs text-[#6B7280] dark:text-gray-500">Time Limit: {lesson.duration}</p>
                         </div>
                         <div className="flex gap-2">
                           <button 
                             onClick={() => setEditingLesson(lesson)}
-                            className="px-3 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
+                            className="px-4 py-2 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-900/40"
                           >
-                            Edit
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteLesson(lesson.id)}
-                            className="px-3 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30"
-                          >
-                            Delete
+                            Edit Time Limit
                           </button>
                         </div>
                       </div>
@@ -728,12 +712,6 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
             <div className="mt-12 pt-12 border-t border-[#F3F4F6] dark:border-gray-700">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-sm font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Assessment Questions</h4>
-                <button 
-                  onClick={() => setEditingAssessment({ question: '', options: [], answer: '' })}
-                  className="px-3 py-1.5 text-xs font-bold text-[#111827] dark:text-white bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-                >
-                  + Add Question
-                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {assessmentQuestions.map((q) => (
@@ -741,20 +719,6 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                     <div>
                       <p className="font-bold text-[#111827] dark:text-white line-clamp-1">{q.question}</p>
                       <p className="text-xs text-[#6B7280] dark:text-gray-500">{q.options.length} options • Ans: {q.answer}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => setEditingAssessment(q)}
-                        className="px-3 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteAssessment(q.id)}
-                        className="px-3 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30"
-                      >
-                        Delete
-                      </button>
                     </div>
                   </div>
                 ))}
@@ -803,7 +767,12 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                           {user.name?.charAt(0) || 'U'}
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-[#111827] dark:text-white">{user.name || 'Anonymous'}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-bold text-[#111827] dark:text-white">{user.name || 'Anonymous'}</p>
+                            {user.is_admin ? (
+                              <span className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-950 text-[9px] font-extrabold text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900 rounded uppercase tracking-wider">Admin</span>
+                            ) : null}
+                          </div>
                           <p className="text-xs text-[#6B7280] dark:text-gray-500">{user.email}</p>
                         </div>
                       </div>
@@ -832,8 +801,8 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                         </button>
                         <button 
                           onClick={() => handleTogglePro(user.id, !!user.is_pro)}
-                          className={`p-2 rounded-lg transition-colors ${user.is_pro ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30' : 'text-gray-400 dark:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
-                          title={user.is_pro ? "Remove Pro" : "Make Pro"}
+                          className={`p-2 rounded-lg transition-colors ${user.is_pro ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:hover:bg-amber-900/40' : 'text-gray-400 dark:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                          title={user.is_pro ? "Remove Free Subscription" : "Grant Lifetime Pro Free"}
                         >
                           <Zap size={18} />
                         </button>
@@ -850,6 +819,147 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'admin-group' && (
+        <div className="space-y-8">
+          {/* Warning banner */}
+          <div className="p-6 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-3xl flex items-start gap-4">
+            <div className="p-3 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-400 rounded-2xl">
+              <ShieldCheck size={24} />
+            </div>
+            <div>
+              <h4 className="text-lg font-bold text-amber-900 dark:text-amber-300">Admin Group Isolation</h4>
+              <p className="text-sm text-amber-700 dark:text-amber-400/80 mt-1">
+                To prevent accidental delegation of admin privileges, the Admin Group has been isolated from the regular user management settings. Grant administrative privileges only to users whom you trust with full access to systems and databases.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Add Admin Section */}
+            <div className="lg:col-span-1 bg-white dark:bg-[#1F2937] p-8 rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm space-y-6">
+              <div>
+                <h3 className="text-xl font-bold text-[#111827] dark:text-white">Add User to Admin Group</h3>
+                <p className="text-xs text-[#6B7280] dark:text-gray-400 mt-1">
+                  Select a registered user to grant full administrative privileges.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider ml-1">Select User</label>
+                  <select 
+                    value={selectedNewAdminId}
+                    onChange={(e) => setSelectedNewAdminId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 text-sm text-[#111827] dark:text-white"
+                  >
+                    <option value="">-- Choose a user --</option>
+                    {users.filter(u => !u.is_admin).map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name || 'Anonymous'} ({u.email || 'No email'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={!selectedNewAdminId}
+                  onClick={() => {
+                    const userToPromote = users.find(u => u.id === selectedNewAdminId);
+                    if (!userToPromote) return;
+                    const confirmGrant = window.confirm(
+                      `🚨 WARNING: Are you absolutely sure you want to grant full ADMINISTRATOR access to ${userToPromote.name || 'Anonymous'} (${userToPromote.email})?\n\nThey will have full access to edit pricing, manage lessons, view telemetry, and administer users.`
+                    );
+                    if (confirmGrant) {
+                      handleToggleAdmin(userToPromote.id, false);
+                      setSelectedNewAdminId('');
+                      alert(`${userToPromote.name || 'User'} is now an administrator.`);
+                    }
+                  }}
+                  className={`w-full py-3.5 rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 shadow-sm ${
+                    selectedNewAdminId
+                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <ShieldCheck size={18} />
+                  Add to Admin Group
+                </button>
+              </div>
+            </div>
+
+            {/* List of current Admins */}
+            <div className="lg:col-span-2 bg-white dark:bg-[#1F2937] p-8 rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm space-y-6">
+              <div>
+                <h3 className="text-xl font-bold text-[#111827] dark:text-white">Current Administrators ({users.filter(u => u.is_admin).length})</h3>
+                <p className="text-xs text-[#6B7280] dark:text-gray-400 mt-1">
+                  These users currently have administrative privileges.
+                </p>
+              </div>
+
+              <div className="overflow-hidden border border-[#E5E7EB] dark:border-gray-700 rounded-2xl">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-[#F9FAFB] dark:bg-gray-800/50 border-b border-[#E5E7EB] dark:border-gray-700">
+                    <tr>
+                      <th className="px-6 py-4 text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Admin User</th>
+                      <th className="px-6 py-4 text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Role</th>
+                      <th className="px-6 py-4 text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5E7EB] dark:divide-gray-700">
+                    {users.filter(u => u.is_admin).length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-6 py-8 text-center text-sm text-gray-500">
+                          No administrators found in the database.
+                        </td>
+                      </tr>
+                    ) : (
+                      users.filter(u => u.is_admin).map((user) => (
+                        <tr key={user.id} className="hover:bg-[#F9FAFB] dark:hover:bg-gray-800/30 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl flex items-center justify-center text-indigo-700 dark:text-indigo-400 font-bold text-sm">
+                                {user.name?.charAt(0) || 'A'}
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-[#111827] dark:text-white">{user.name || 'Admin User'}</p>
+                                <p className="text-xs text-[#6B7280] dark:text-gray-500">{user.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950 text-[10px] font-extrabold text-[#4F46E5] dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900 rounded-full uppercase tracking-wider">
+                              Full access
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const confirmRevoke = window.confirm(
+                                  `❌ Are you sure you want to REVOKE admin privileges for ${user.name || 'Anonymous'} (${user.email})?`
+                                );
+                                if (confirmRevoke) {
+                                  handleToggleAdmin(user.id, true);
+                                  alert(`Administrative access has been revoked for ${user.name || 'User'}.`);
+                                }
+                              }}
+                              className="px-3.5 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 rounded-xl transition-all"
+                            >
+                              Revoke Access
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -919,7 +1029,21 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                     <option>Advanced</option>
                   </select>
                 </div>
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col gap-3 py-2">
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl">
+                    <div>
+                      <p className="text-sm font-bold text-[#111827] dark:text-white">Free Pro Subscription</p>
+                      <p className="text-xs text-[#6B7280] dark:text-gray-500">Provide lifetime premium features</p>
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      name="is_pro" 
+                      defaultChecked={!!editingUser.is_pro}
+                      className="w-5 h-5 accent-indigo-600 rounded cursor-pointer"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-3 pt-2">
                   <button type="button" onClick={() => setEditingUser(null)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-400 rounded-xl font-bold">Cancel</button>
                   <button type="submit" className="flex-1 py-3 bg-[#111827] dark:bg-indigo-600 text-white rounded-xl font-bold">Save Changes</button>
                 </div>
@@ -995,32 +1119,36 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
       <AnimatePresence>
         {editingLesson && (
           <motion.div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div className="bg-white dark:bg-[#1F2937] rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-[#E5E7EB] dark:border-gray-700 max-h-[90vh] overflow-y-auto">
-              <h4 className="text-2xl font-bold text-[#111827] dark:text-white mb-6">
-                {editingLesson.id ? `Edit Lesson: ${editingLesson.title}` : 'Add New Lesson'}
+            <motion.div className="bg-white dark:bg-[#1F2937] rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-[#E5E7EB] dark:border-gray-700 max-h-[90vh] overflow-y-auto w-full">
+              <h4 className="text-2xl font-bold text-[#111827] dark:text-white mb-2">
+                Edit Lesson Time Limit: {editingLesson.title}
               </h4>
+              <p className="text-sm text-amber-600 dark:text-amber-400 font-medium mb-6">⚠️ For security and content consistency, only the time limit (Duration) can be modified here.</p>
+              
               <form onSubmit={handleUpdateLesson} className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Title</label>
-                  <input name="title" defaultValue={editingLesson.title} className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 text-[#111827] dark:text-white" required />
+                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Lesson Title (Read Only)</label>
+                  <input name="title" defaultValue={editingLesson.title} readOnly disabled className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-850 opacity-65 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 text-[#111827] dark:text-white cursor-not-allowed font-medium" required />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Duration</label>
-                  <input name="duration" defaultValue={editingLesson.duration} className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 text-[#111827] dark:text-white" required />
+                  <label className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1">⏰ Lesson Time Limit / Duration</label>
+                  <input name="duration" defaultValue={editingLesson.duration} className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-indigo-500 dark:border-indigo-500 focus:ring-2 focus:ring-indigo-600 rounded-xl outline-none mt-1 text-[#111827] dark:text-white font-bold" placeholder="e.g. 15 mins" required />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Content (JSON)</label>
+                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider">Lesson Content JSON (Read Only)</label>
                   <textarea 
                     name="content" 
                     defaultValue={JSON.stringify(editingLesson.content, null, 2)} 
-                    rows={10} 
-                    className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 font-mono text-xs text-[#111827] dark:text-white" 
+                    readOnly 
+                    disabled 
+                    rows={6} 
+                    className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-850 opacity-65 border border-[#E5E7EB] dark:border-gray-700 rounded-xl outline-none mt-1 font-mono text-xs text-[#111827] dark:text-white cursor-not-allowed" 
                     required
                   />
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button type="button" onClick={() => setEditingLesson(null)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-400 rounded-xl font-bold">Cancel</button>
-                  <button type="submit" className="flex-1 py-3 bg-[#111827] dark:bg-indigo-600 text-white rounded-xl font-bold">Save Lesson</button>
+                  <button type="submit" className="flex-1 py-3 bg-[#111827] dark:bg-indigo-600 text-white rounded-xl font-bold hover:bg-[#223] dark:hover:bg-indigo-700">Save Changes</button>
                 </div>
               </form>
             </motion.div>
