@@ -139,7 +139,7 @@ export default function App() {
       setIsAuthenticated(true);
       setUserEmail(email);
       setUserName(localStorage.getItem('humnai_user_name'));
-      setIsAdmin(email.includes('admin'));
+      setIsAdmin(localStorage.getItem('humnai_is_admin') === 'true' || email.includes('admin'));
       
       // Sync from DB
       dbService.getUser(email).then(user => {
@@ -155,6 +155,13 @@ export default function App() {
             setIsPro(false);
             localStorage.setItem('humnai_is_pro', 'false');
           }
+          if (user.is_admin || user.email?.includes('admin')) {
+            setIsAdmin(true);
+            localStorage.setItem('humnai_is_admin', 'true');
+          } else {
+            setIsAdmin(false);
+            localStorage.setItem('humnai_is_admin', 'false');
+          }
           if (user.onboarding) {
             localStorage.setItem('humnai_onboarding_completed', 'true');
             localStorage.setItem('humnai_user_language', user.onboarding.nativeLanguage);
@@ -162,6 +169,25 @@ export default function App() {
           if (user.progress) {
             localStorage.setItem('humnai_completed_days', JSON.stringify(user.progress));
           }
+        } else {
+          // AUTO-RECOVERY FOR SERVERLESS: If user info is lost due to Vercel ephemeral database resets,
+          // re-sync stored profile from localStorage back to database!
+          const storedName = localStorage.getItem('humnai_user_name') || email.split('@')[0];
+          const storedMobile = localStorage.getItem('humnai_user_mobile') || undefined;
+          const storedIsPro = localStorage.getItem('humnai_is_pro') === 'true';
+          const storedDays = localStorage.getItem('humnai_completed_days');
+          let storedProgress = null;
+          try {
+            if (storedDays) storedProgress = JSON.parse(storedDays);
+          } catch(e) {}
+
+          dbService.syncUser({
+            email,
+            name: storedName,
+            mobile: storedMobile,
+            isPro: storedIsPro,
+            progress: storedProgress
+          });
         }
       });
 
@@ -177,10 +203,12 @@ export default function App() {
     if (name) setUserName(name);
     
     const isUserAdmin = email.includes('admin');
-    setIsAdmin(isUserAdmin);
+    setIsAdmin(isUserAdmin || localStorage.getItem('humnai_is_admin') === 'true');
     if (isUserAdmin) {
       setIsPro(true);
       localStorage.setItem('humnai_is_pro', 'true');
+      setIsAdmin(true);
+      localStorage.setItem('humnai_is_admin', 'true');
     }
     
     localStorage.setItem('humnai_auth', 'true');
@@ -197,6 +225,14 @@ export default function App() {
     } else {
       setIsPro(false);
       localStorage.setItem('humnai_is_pro', 'false');
+    }
+
+    if (userData.is_admin || isUserAdmin) {
+      setIsAdmin(true);
+      localStorage.setItem('humnai_is_admin', 'true');
+    } else {
+      setIsAdmin(false);
+      localStorage.setItem('humnai_is_admin', 'false');
     }
 
     if (isNewUser) {
