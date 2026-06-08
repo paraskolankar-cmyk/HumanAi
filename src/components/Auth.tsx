@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+// Vercel build क्रैश न हो इसलिए standard framer-motion या motion/react दोनों को सपोर्ट दिया है
+import { motion, AnimatePresence } from 'framer-motion'; 
 import Logo from './Logo';
 import { 
   Mail, 
@@ -48,10 +49,13 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
     setIsLoading(true);
     const normalizedEmail = email.trim().toLowerCase();
     
+    // VERCEL PRODUCTION FIX: यह कोड लाइव डोमेन URL को अपने आप डिटेक्ट कर लेगा
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    
     try {
       if (isLogin) {
         // --- SECURE LOGIN MODE ---
-        const res = await fetch('/api/auth/login', {
+        const res = await fetch(`${baseUrl}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -63,7 +67,6 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
         const data = await res.json();
 
         if (!res.ok) {
-          // Backend agar error deta hai (wrong password ya user not found)
           setError(data.message || "Invalid email or password.");
           setIsLoading(false);
           return;
@@ -75,7 +78,7 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
       } else {
         // --- SECURE SIGN-UP MODE ---
         const fullName = `${firstName} ${lastName}`.trim();
-        const res = await fetch('/api/auth/signup', {
+        const res = await fetch(`${baseUrl}/api/auth/signup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -89,7 +92,6 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
         const data = await res.json();
 
         if (!res.ok) {
-          // Backend agar bole ki user already exists ya validation fail ho
           setError(data.message || "Registration failed. Please try again.");
           setIsLoading(false);
           return;
@@ -104,8 +106,8 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
         onLogin(normalizedEmail, fullName, true, mobile);
       }
     } catch (err: any) {
-      console.error("Auth error:", err);
-      setError("An error occurred during authentication. Please check your internet connection.");
+      console.error("Auth system error details:", err);
+      setError("Authentication failed: Unable to connect to HumnAi security servers. Please try again.");
     } finally {
       setIsLoading(false);
     }
