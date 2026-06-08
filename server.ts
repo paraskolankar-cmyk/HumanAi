@@ -490,7 +490,7 @@ app.post("/api/user/sync", (req, res) => {
 async function startServer() {
   const httpServer = createHttpServer(app);
   io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
-  const PORT = 3000; // सर्वर लोकल पोर्ट 3000 पर सुनेगा
+  const PORT = 5000; // सर्वर लोकल पोर्ट 3000 पर सुनेगा
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
