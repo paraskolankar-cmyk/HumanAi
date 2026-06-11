@@ -49,13 +49,10 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
     setIsLoading(true);
     const normalizedEmail = email.trim().toLowerCase();
     
-    // VERCEL PRODUCTION FIX: यह कोड लाइव डोमेन URL को अपने आप डिटेक्ट कर लेगा
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-    
     try {
       if (isLogin) {
-        // --- SECURE LOGIN MODE ---
-        const res = await fetch(`${baseUrl}/api/auth/login`, {
+        // --- SECURE LOGIN MODE (RELATIVE PATH APPLIED) ---
+        const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -76,9 +73,9 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
         onLogin(normalizedEmail, data.name, false);
 
       } else {
-        // --- SECURE SIGN-UP MODE ---
+        // --- SECURE SIGN-UP MODE (RELATIVE PATH APPLIED) ---
         const fullName = `${firstName} ${lastName}`.trim();
-        const res = await fetch(`${baseUrl}/api/auth/signup`, {
+        const res = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
