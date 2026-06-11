@@ -20,6 +20,17 @@ export default defineConfig(({ mode }) => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
+      
+      // === UPDATE: LOCAL DEVELOPMENT PROXY ADDED ===
+      proxy: {
+        // Jab aap local machine par register ya login karenge, 
+        // toh yeh frontend ki requests ko backend port 5000 par bhejega
+        '/api': {
+          target: 'http://localhost:5000',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     build: {
       // 1. Chunk size limit ko 1000kB tak badha diya
