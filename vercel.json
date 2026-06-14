@@ -25,6 +25,11 @@
       "methods": ["POST", "OPTIONS"]
     },
     {
+      "src": "/api/users",
+      "dest": "/api/users.ts",
+      "methods": ["GET", "OPTIONS"]
+    },
+    {
       "src": "/(.*)",
       "dest": "/dist/$1"
     }
