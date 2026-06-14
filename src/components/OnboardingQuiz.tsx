@@ -13,7 +13,6 @@ import {
   Volume2,
   Loader2
 } from 'lucide-react';
-import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { safeJsonParse } from '../services/geminiService';
 
 interface OnboardingQuizProps {
@@ -77,67 +76,15 @@ export default function OnboardingQuiz({ onComplete, isDarkMode }: OnboardingQui
   const translateUI = async () => {
     setIsTranslating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Translate the following English strings into ${data.nativeLanguage}. 
-        Return a JSON object with these keys:
-        - q2Title: "What do you do?"
-        - q2Sub: "Tell us about your current status."
-        - q3Title: "How much English can you speak?"
-        - q3Sub: "Select your current proficiency level."
-        - finishTitle: "All Set!"
-        - finishMessage: "Pareshan n ho mai HumnAi apka dost english practice me apki madad karuga ."
-        - next: "Next"
-        - back: "Back"
-        - finish: "Finish"
-        - specify: "Please specify..."
-        - options: {
-            school: "School",
-            college: "College",
-            work: "Work",
-            business: "Business",
-            other: "Other",
-            words: "1-2 Words bol lete hai",
-            sentences: "1-2 Sentences bol lete hai",
-            normal: "Normal day-to-day bol lete hai par confident nahi hai",
-            advance: "Advance level tak"
-          }
-        `,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              q2Title: { type: Type.STRING },
-              q2Sub: { type: Type.STRING },
-              q3Title: { type: Type.STRING },
-              q3Sub: { type: Type.STRING },
-              finishTitle: { type: Type.STRING },
-              finishMessage: { type: Type.STRING },
-              next: { type: Type.STRING },
-              back: { type: Type.STRING },
-              finish: { type: Type.STRING },
-              specify: { type: Type.STRING },
-              options: {
-                type: Type.OBJECT,
-                properties: {
-                  school: { type: Type.STRING },
-                  college: { type: Type.STRING },
-                  work: { type: Type.STRING },
-                  business: { type: Type.STRING },
-                  other: { type: Type.STRING },
-                  words: { type: Type.STRING },
-                  sentences: { type: Type.STRING },
-                  normal: { type: Type.STRING },
-                  advance: { type: Type.STRING },
-                }
-              }
-            }
-          }
-        }
+      const response = await fetch("/api/gemini/translate-onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nativeLanguage: data.nativeLanguage }),
       });
-      const result = safeJsonParse(response.text);
+      if (!response.ok) {
+        throw new Error("Failed to translate onboarding questions");
+      }
+      const result = await response.json();
       setTranslations(result);
     } catch (error) {
       console.error("Translation failed", error);
