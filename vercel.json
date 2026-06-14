@@ -1,26 +1,11 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/**/*.ts", "use": "@vercel/node" },
+    { "src": "api/index.ts", "use": "@vercel/node" },
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
   ],
   "routes": [
-    { "src": "/api/auth/signup", "dest": "/api/auth/signup.ts" },
-    { "src": "/api/auth/login", "dest": "/api/auth/login.ts" },
-    { "src": "/api/admin/stats", "dest": "/api/admin/stats.ts" },
-    { "src": "/api/admin/users/delete", "dest": "/api/admin/users/delete.ts" },
-    { "src": "/api/admin/users/update-pro", "dest": "/api/admin/users/update-pro.ts" },
-    { "src": "/api/admin/users/update-admin", "dest": "/api/admin/users/update-admin.ts" },
-    { "src": "/api/admin/users/update", "dest": "/api/admin/users/update.ts" },
-    { "src": "/api/admin/users", "dest": "/api/admin/users.ts" },
-    { "src": "/api/admin/plans/update", "dest": "/api/admin/plans/update.ts" },
-    { "src": "/api/admin/plans/delete", "dest": "/api/admin/plans/delete.ts" },
-    { "src": "/api/admin/plans/create", "dest": "/api/admin/plans/create.ts" },
-    { "src": "/api/plans", "dest": "/api/plans.ts" },
-    { "src": "/api/modules", "dest": "/api/modules.ts" },
-    { "src": "/api/assessment-questions", "dest": "/api/assessment-questions.ts" },
-    { "src": "/api/sync", "dest": "/api/sync.ts" },
-    { "src": "/api/users", "dest": "/api/users.ts" },
+    { "src": "/api/(.*)", "dest": "/api/index.ts" },
     { "src": "/(.*)", "dest": "/dist/$1" }
   ]
 }
