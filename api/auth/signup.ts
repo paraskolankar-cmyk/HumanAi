@@ -1,37 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import fs from 'fs';
 
-const DB_PATH = '/tmp/humnai_users.json';
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY!;
 
-function loadUsers() {
-  try {
-    if (fs.existsSync(DB_PATH)) {
-      return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('DB load error:', e);
-  }
-  return [];
-}
-
-function saveUsers(users: any[]) {
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('DB save error:', e);
-  }
-}
-
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
   const { email, password, name, mobile } = req.body || {};
 
@@ -45,31 +23,57 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(400).json({ message: 'Password kam se kam 6 characters ka hona chahiye.' });
   }
 
-  const users = loadUsers();
-  const existingUser = users.find((u: any) => u.email === normalizedEmail);
+  try {
+    // Check if user already exists
+    const checkRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(normalizedEmail)}&select=id`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      }
+    );
 
-  if (existingUser) {
-    return res.status(400).json({ message: 'Is email se account pehle se exist karta hai.' });
+    const existing = await checkRes.json();
+    if (existing.length > 0) {
+      return res.status(400).json({ message: 'Is email se account pehle se exist karta hai.' });
+    }
+
+    // Insert new user
+    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password: String(password),
+        name: String(name || '').trim(),
+        mobile: String(mobile || '').trim(),
+        level: 'Beginner',
+        is_pro: 0,
+        is_admin: 0,
+      }),
+    });
+
+    const newUser = await insertRes.json();
+
+    if (!insertRes.ok) {
+      console.error('Supabase insert error:', newUser);
+      return res.status(500).json({ message: 'User save karne mein error aaya.' });
+    }
+
+    return res.status(201).json({
+      message: 'Registration successful!',
+      name: newUser[0]?.name,
+      email: newUser[0]?.email,
+    });
+  } catch (err) {
+    console.error('Signup error:', err);
+    return res.status(500).json({ message: 'Server error. Please try again.' });
   }
-
-  const newUser = {
-    id: Date.now(),
-    email: normalizedEmail,
-    password: String(password),
-    name: String(name || '').trim(),
-    mobile: String(mobile || '').trim(),
-    level: 'Beginner',
-    is_pro: 0,
-    is_admin: 0,
-    createdAt: new Date().toISOString(),
-  };
-
-  users.push(newUser);
-  saveUsers(users);
-
-  return res.status(201).json({
-    message: 'Registration successful!',
-    name: newUser.name,
-    email: newUser.email,
-  });
 }
