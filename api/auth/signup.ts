@@ -1,4 +1,5 @@
-const fs = require('fs');
+import type { NextApiRequest, NextApiResponse } from 'next';
+import fs from 'fs';
 
 const DB_PATH = '/tmp/humnai_users.json';
 
@@ -13,7 +14,7 @@ function loadUsers() {
   return [];
 }
 
-function saveUsers(users) {
+function saveUsers(users: any[]) {
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2), 'utf-8');
   } catch (e) {
@@ -21,12 +22,13 @@ function saveUsers(users) {
   }
 }
 
-module.exports = function handler(req, res) {
+export default function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
@@ -44,8 +46,8 @@ module.exports = function handler(req, res) {
   }
 
   const users = loadUsers();
-  const existingUser = users.find((u) => u.email === normalizedEmail);
-  
+  const existingUser = users.find((u: any) => u.email === normalizedEmail);
+
   if (existingUser) {
     return res.status(400).json({ message: 'Is email se account pehle se exist karta hai.' });
   }
@@ -70,4 +72,4 @@ module.exports = function handler(req, res) {
     name: newUser.name,
     email: newUser.email,
   });
-};
+}
