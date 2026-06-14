@@ -17,7 +17,8 @@ import {
   Download,
   Zap,
   BookOpen,
-  Trash2
+  Trash2,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -50,6 +51,7 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
   const [plans, setPlans] = useState<any[]>([]);
   const [editingPlan, setEditingPlan] = useState<any>(null);
   const [newPrice, setNewPrice] = useState('');
+  const [newInterval, setNewInterval] = useState('');
 
   // Content Management State
   const [modules, setModules] = useState<any[]>([]);
@@ -63,30 +65,32 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editingPlanModal, setEditingPlanModal] = useState<any>(null);
   const [selectedNewAdminId, setSelectedNewAdminId] = useState<number | ''>('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (isAdmin) {
       const socket = io();
 
       socket.on('user:registered', (newUser) => {
-        setUsers(prev => {
-          // Check if user already exists in the list
-          const exists = prev.some(u => u.id === newUser.id || u.email === newUser.email);
-          if (exists) {
-            return prev.map(u => (u.id === newUser.id || u.email === newUser.email) ? newUser : u);
-          }
-          return [newUser, ...prev];
-        });
+        setUsers(prevUsers => {
+          const exists = prevUsers.some(u => u.id === newUser.id || u.email === newUser.email);
+          
+          setStats((prevStats: any) => {
+            if (!prevStats) return prevStats;
+            const isNew = !exists;
+            return {
+              ...prevStats,
+              totalUsers: isNew ? prevStats.totalUsers + 1 : prevStats.totalUsers,
+              proUsers: newUser.is_pro 
+                ? (prevStats.proUsers + (isNew ? 1 : 0)) 
+                : prevStats.proUsers
+            };
+          });
 
-        // Update stats as well
-        setStats((prev: any) => {
-          if (!prev) return prev;
-          const isNew = !users.some(u => u.email === newUser.email);
-          return {
-            ...prev,
-            totalUsers: isNew ? prev.totalUsers + 1 : prev.totalUsers,
-            proUsers: newUser.is_pro ? (prev.proUsers + (isNew ? 1 : 0)) : prev.proUsers
-          };
+          if (exists) {
+            return prevUsers.map(u => (u.id === newUser.id || u.email === newUser.email) ? newUser : u);
+          }
+          return [newUser, ...prevUsers];
         });
       });
 
@@ -94,48 +98,61 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
         socket.disconnect();
       };
     }
-  }, [isAdmin, users.length]);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (isAdmin) {
       const fetchData = async (retries = 3) => {
         try {
-          const [statsRes, plansRes, modulesRes, assessmentRes, usersRes] = await Promise.all([
-            fetch('/api/admin/stats'),
-            fetch('/api/plans'),
-            fetch('/api/modules'),
-            fetch('/api/assessment-questions'),
-            fetch('/api/admin/users')
-          ]);
-
-          const results = await Promise.all([
-            statsRes.text(),
-            plansRes.text(),
-            modulesRes.text(),
-            assessmentRes.text(),
-            usersRes.text()
-          ]);
-
-          if (results.some(r => r.includes("Rate exceeded"))) {
-            if (retries > 0) {
-              setTimeout(() => fetchData(retries - 1), 2000);
-              return;
+          const safeFetch = async (url: string, fallbackValue: any) => {
+            try {
+              const res = await fetch(url);
+              if (!res.ok) {
+                console.warn(`Safe fetch failure for ${url}: status ${res.status}`);
+                return fallbackValue;
+              }
+              const text = await res.text();
+              if (text.includes("Rate exceeded") || text.includes("Too Many Requests")) {
+                console.warn(`Safe fetch rate limited for ${url}`);
+                return fallbackValue;
+              }
+              return JSON.parse(text);
+            } catch (err) {
+              console.error(`Safe fetch error for ${url}:`, err);
+              return fallbackValue;
             }
-            throw new Error("Rate limit exceeded");
-          }
+          };
 
-          setStats(JSON.parse(results[0]));
-          setPlans(JSON.parse(results[1]));
-          setModules(JSON.parse(results[2]));
-          setAssessmentQuestions(JSON.parse(results[3]));
-          setUsers(JSON.parse(results[4]));
+          const [parsedStats, parsedPlans, parsedModules, parsedAssessment, parsedUsers] = await Promise.all([
+            safeFetch('/api/admin/stats', null),
+            safeFetch('/api/plans', []),
+            safeFetch('/api/modules', []),
+            safeFetch('/api/assessment-questions', []),
+            safeFetch('/api/admin/users', [])
+          ]);
+
+          setStats(parsedStats && typeof parsedStats === 'object' && !parsedStats.error ? parsedStats : null);
+          setPlans(Array.isArray(parsedPlans) ? parsedPlans : []);
+          setModules(Array.isArray(parsedModules) ? parsedModules : []);
+          setAssessmentQuestions(Array.isArray(parsedAssessment) ? parsedAssessment : []);
+          setUsers(Array.isArray(parsedUsers) ? parsedUsers : []);
         } catch (error) {
           console.error('Failed to fetch admin data', error);
         } finally {
           setIsLoading(false);
         }
       };
+      
       fetchData();
+
+      // Setup a robust background polling interval (every 10 seconds)
+      const intervalId = setInterval(() => {
+        fetchData();
+      }, 10000);
+
+      return () => {
+        clearInterval(intervalId);
+      };
     }
   }, [isAdmin]);
 
@@ -144,6 +161,10 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
       const fetchLessons = async (retries = 3) => {
         try {
           const res = await fetch(`/api/modules/${selectedModuleId}/lessons`);
+          if (!res.ok) {
+            setLessons([]);
+            return;
+          }
           const text = await res.text();
           
           if (text.includes("Rate exceeded")) {
@@ -151,13 +172,20 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
               setTimeout(() => fetchLessons(retries - 1), 2000);
               return;
             }
-            throw new Error("Rate limit exceeded");
+            setLessons([]);
+            return;
           }
 
-          const data = JSON.parse(text);
-          setLessons(data);
+          try {
+            const data = JSON.parse(text);
+            setLessons(Array.isArray(data) ? data : []);
+          } catch(e) {
+            console.error("JSON parse failure for lessons:", e);
+            setLessons([]);
+          }
         } catch (error) {
           console.error('Failed to fetch lessons', error);
+          setLessons([]);
         }
       };
       fetchLessons();
@@ -191,20 +219,41 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
   };
 
   const handleUpdatePrice = async () => {
-    if (!editingPlan || !newPrice) return;
+    if (!editingPlan || !newPrice || !newInterval) return;
     try {
       const response = await fetch('/api/admin/plans/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editingPlan.id, price: parseFloat(newPrice) })
+        body: JSON.stringify({ 
+          id: editingPlan.id, 
+          price: parseFloat(newPrice),
+          interval: newInterval
+        })
       });
       if (response.ok) {
-        setPlans(plans.map(p => p.id === editingPlan.id ? { ...p, price: parseFloat(newPrice) } : p));
+        setPlans(plans.map(p => p.id === editingPlan.id ? { ...p, price: parseFloat(newPrice), interval: newInterval } : p));
         setEditingPlan(null);
         setNewPrice('');
+        setNewInterval('');
       }
     } catch (error) {
-      console.error('Failed to update plan price', error);
+      console.error('Failed to update plan', error);
+    }
+  };
+
+  const handleDeletePlan = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this course plan? This action is irreversible.')) return;
+    try {
+      const response = await fetch('/api/admin/plans/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (response.ok) {
+        setPlans(plans.filter(p => p.id !== id));
+      }
+    } catch (error) {
+      console.error('Failed to delete plan', error);
     }
   };
 
@@ -606,26 +655,46 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                 <h3 className="text-xl font-bold text-[#111827] dark:text-white">Plan Management</h3>
                 <p className="text-xs text-gray-500 mt-1">Pricing tiers available for the courses.</p>
               </div>
+              <button 
+                onClick={() => setEditingPlanModal({})}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+              >
+                <Plus size={16} />
+                Create New Plan
+              </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {plans.map((plan) => (
                 <div key={plan.id} className="p-6 rounded-2xl border border-[#F3F4F6] dark:border-gray-700 bg-[#F9FAFB] dark:bg-gray-800/50 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-bold text-[#111827] dark:text-white">{plan.name}</p>
-                    <p className="text-xs text-[#6B7280] dark:text-gray-500">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-bold text-[#111827] dark:text-white">{plan.name}</p>
+                      <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded font-semibold">{plan.id}</span>
+                    </div>
+                    <p className="text-xs text-[#6B7280] dark:text-gray-500 mt-0.5">
                       {plan.interval === 'day' ? 'One-time' : plan.interval === 'week' ? 'Weekly' : `Billed ${plan.interval}ly`}
                     </p>
                     <p className="text-2xl font-bold text-[#111827] dark:text-white mt-1">₹{plan.price}</p>
                   </div>
-                  <button 
-                    onClick={() => {
-                      setEditingPlan(plan);
-                      setNewPrice(plan.price.toString());
-                    }}
-                    className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl text-sm font-bold text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all"
-                  >
-                    Edit Rate
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        setEditingPlan(plan);
+                        setNewPrice(plan.price.toString());
+                        setNewInterval(plan.interval || 'month');
+                      }}
+                      className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl text-sm font-bold text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all"
+                    >
+                      Edit Rate
+                    </button>
+                    <button 
+                      onClick={() => handleDeletePlan(plan.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all border border-transparent hover:border-red-200 dark:hover:border-red-900/40"
+                      title="Delete Plan"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -737,6 +806,8 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
                 <input 
                   type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search users..." 
                   className="pl-10 pr-4 py-2.5 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none w-full md:w-64 text-[#111827] dark:text-white"
                 />
@@ -759,7 +830,12 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E5E7EB] dark:divide-gray-700">
-                {users.map((user, i) => (
+                {(Array.isArray(users) ? users : []).filter(u => 
+                  !searchQuery ||
+                  u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  u.mobile?.includes(searchQuery)
+                ).map((user, i) => (
                   <tr key={user.id} className="hover:bg-[#F9FAFB] dark:hover:bg-gray-800/30 transition-colors">
                     <td className="px-8 py-5">
                       <div className="flex items-center gap-3">
@@ -1202,6 +1278,19 @@ export default function AdminPanel({ isDarkMode, userEmail, userName }: AdminPan
                     onChange={(e) => setNewPrice(e.target.value)}
                     className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none mt-1 text-[#111827] dark:text-white"
                   />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-500 uppercase tracking-wider ml-1">Time Limit (Interval)</label>
+                  <select
+                    value={newInterval}
+                    onChange={(e) => setNewInterval(e.target.value)}
+                    className="w-full px-4 py-3 bg-[#F9FAFB] dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none mt-1 text-[#111827] dark:text-white"
+                  >
+                    <option value="day">1 Day (Free Trial)</option>
+                    <option value="week">1 Week (7 Days)</option>
+                    <option value="month">1 Month</option>
+                    <option value="year">1 Year</option>
+                  </select>
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button onClick={() => setEditingPlan(null)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-400 rounded-xl font-bold">Cancel</button>
