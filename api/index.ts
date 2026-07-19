@@ -1,28 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@libsql/client';
 
-const SUPABASE_URL = 'https://oeuerdnisbplolskepin.supabase.co';
-const SUPABASE_KEY = () => process.env.SUPABASE_ANON_KEY!;
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN!,
+});
 
 function setCors(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-}
-
-async function sb(path: string, method = 'GET', body?: any) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method,
-    headers: {
-      apikey: SUPABASE_KEY(),
-      Authorization: `Bearer ${SUPABASE_KEY()}`,
-      'Content-Type': 'application/json',
-      Prefer: method === 'POST' ? 'return=representation' : '',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  try { return { ok: res.ok, data: JSON.parse(text) }; }
-  catch { return { ok: res.ok, data: text }; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -38,81 +25,128 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { email, password, name, mobile } = body;
       if (!email || !password) return res.status(400).json({ message: 'Email aur Password required hain.' });
       if (String(password).length < 6) return res.status(400).json({ message: 'Password 6+ characters hona chahiye.' });
+
       const normalizedEmail = String(email).trim().toLowerCase();
-      const check = await sb(`users?email=eq.${encodeURIComponent(normalizedEmail)}&select=id`);
-      if (check.data?.length > 0) return res.status(400).json({ message: 'Is email se account pehle se exist karta hai.' });
-      const insert = await sb('users', 'POST', { email: normalizedEmail, password: String(password), name: String(name || '').trim(), mobile: String(mobile || '').trim(), level: 'Beginner', is_pro: 0, is_admin: 0 });
-      if (!insert.ok) return res.status(500).json({ message: 'User save karne mein error aaya.' });
-      return res.status(201).json({ message: 'Registration successful!', name: insert.data[0]?.name, email: insert.data[0]?.email });
+
+      const check = await client.execute({
+        sql: 'SELECT id FROM users WHERE email = ?',
+        args: [normalizedEmail],
+      });
+      if (check.rows.length > 0) {
+        return res.status(400).json({ message: 'Is email se account pehle se exist karta hai.' });
+      }
+
+      await client.execute({
+        sql: `INSERT INTO users (email, password, name, mobile, level, is_pro, is_admin)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [normalizedEmail, String(password), String(name || '').trim(), String(mobile || '').trim(), 'Beginner', 0, 0],
+      });
+
+      return res.status(201).json({ message: 'Registration successful!', name: String(name || '').trim(), email: normalizedEmail });
     }
 
     if (path === 'auth/login' && req.method === 'POST') {
       const { email, password } = body;
       if (!email || !password) return res.status(400).json({ message: 'Email aur Password required hain.' });
+
       const normalizedEmail = String(email).trim().toLowerCase();
-      const result = await sb(`users?email=eq.${encodeURIComponent(normalizedEmail)}&select=*`);
-      if (!result.data?.length) return res.status(401).json({ message: 'Email ya password galat hai.' });
-      const user = result.data[0];
+      const result = await client.execute({
+        sql: 'SELECT * FROM users WHERE email = ?',
+        args: [normalizedEmail],
+      });
+
+      if (!result.rows.length) return res.status(401).json({ message: 'Email ya password galat hai.' });
+      const user = result.rows[0] as any;
       if (user.password !== String(password)) return res.status(401).json({ message: 'Email ya password galat hai.' });
-      return res.status(200).json({ message: 'Login successful!', name: user.name, email: user.email, level: user.level, is_pro: user.is_pro, is_admin: user.is_admin });
+
+      return res.status(200).json({
+        message: 'Login successful!',
+        name: user.name,
+        email: user.email,
+        level: user.level,
+        is_pro: user.is_pro,
+        is_admin: user.is_admin,
+      });
     }
 
     // SYNC
     if (path === 'sync' && req.method === 'POST') {
       const { email, name, mobile, level, is_pro } = body;
       if (!email) return res.status(400).json({ error: 'Email required' });
-      const check = await sb(`users?email=eq.${encodeURIComponent(email)}&select=*`);
-      if (check.data?.length > 0) {
-        const upd: any = {};
-        if (name) upd.name = name;
-        if (mobile) upd.mobile = mobile;
-        if (level) upd.level = level;
-        if (is_pro !== undefined) upd.is_pro = is_pro ? 1 : 0;
-        await sb(`users?email=eq.${encodeURIComponent(email)}`, 'PATCH', upd);
-        const updated = await sb(`users?email=eq.${encodeURIComponent(email)}&select=*`);
-        return res.status(200).json(updated.data[0] || {});
+
+      const check = await client.execute({
+        sql: 'SELECT * FROM users WHERE email = ?',
+        args: [email],
+      });
+
+      if (check.rows.length > 0) {
+        const updates: string[] = [];
+        const args: any[] = [];
+        if (name) { updates.push('name = ?'); args.push(name); }
+        if (mobile) { updates.push('mobile = ?'); args.push(mobile); }
+        if (level) { updates.push('level = ?'); args.push(level); }
+        if (is_pro !== undefined) { updates.push('is_pro = ?'); args.push(is_pro ? 1 : 0); }
+
+        if (updates.length > 0) {
+          args.push(email);
+          await client.execute({
+            sql: `UPDATE users SET ${updates.join(', ')} WHERE email = ?`,
+            args,
+          });
+        }
+
+        const updated = await client.execute({
+          sql: 'SELECT * FROM users WHERE email = ?',
+          args: [email],
+        });
+        return res.status(200).json(updated.rows[0] || {});
       } else {
-        await sb('users', 'POST', { email, name, mobile, level: level || 'Beginner', is_pro: is_pro ? 1 : 0, is_admin: 0 });
+        await client.execute({
+          sql: `INSERT INTO users (email, name, mobile, level, is_pro, is_admin)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [email, name || '', mobile || '', level || 'Beginner', is_pro ? 1 : 0, 0],
+        });
         return res.status(200).json({ email, name, level: level || 'Beginner' });
       }
     }
 
     // USERS
     if (path === 'users' && req.method === 'GET') {
-      const result = await sb('users?select=*');
-      return res.status(200).json(Array.isArray(result.data) ? result.data : []);
+      const result = await client.execute('SELECT * FROM users');
+      return res.status(200).json(result.rows);
     }
 
     // PLANS
     if (path === 'plans' && req.method === 'GET') {
-      const result = await sb('plans?select=*');
-      return res.status(200).json(Array.isArray(result.data) ? result.data : []);
+      const result = await client.execute('SELECT * FROM plans');
+      return res.status(200).json(result.rows);
     }
 
     // MODULES
     if (path === 'modules' && req.method === 'GET') {
-      const result = await sb('modules?select=*');
-      return res.status(200).json(Array.isArray(result.data) ? result.data : []);
+      const result = await client.execute('SELECT * FROM modules');
+      return res.status(200).json(result.rows);
     }
 
     // ASSESSMENT QUESTIONS
     if (path === 'assessment-questions' && req.method === 'GET') {
-      const result = await sb('assessment_questions?select=*');
-      return res.status(200).json(Array.isArray(result.data) ? result.data : []);
+      const result = await client.execute('SELECT * FROM assessment_questions');
+      return res.status(200).json(result.rows);
     }
 
     // ADMIN STATS
     if (path === 'admin/stats' && req.method === 'GET') {
       const [usersRes, paymentsRes] = await Promise.all([
-        sb('users?select=*'),
-        sb('payments?select=*'),
+        client.execute('SELECT * FROM users'),
+        client.execute('SELECT * FROM payments'),
       ]);
-      const users = Array.isArray(usersRes.data) ? usersRes.data : [];
-      const payments = Array.isArray(paymentsRes.data) ? paymentsRes.data : [];
+      const users = usersRes.rows as any[];
+      const payments = paymentsRes.rows as any[];
+
       return res.status(200).json({
         totalUsers: users.length,
-        proUsers: users.filter((u: any) => u.is_pro).length,
-        revenue: payments.filter((p: any) => p.status === 'Success').reduce((s: number, p: any) => s + (p.amount || 0), 0),
+        proUsers: users.filter((u) => u.is_pro).length,
+        revenue: payments.filter((p) => p.status === 'Success').reduce((s, p) => s + (p.amount || 0), 0),
         recentPayments: [],
         userGrowth: [],
       });
@@ -120,38 +154,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ADMIN USERS
     if (path === 'admin/users' && req.method === 'GET') {
-      const result = await sb('users?select=*');
-      return res.status(200).json(Array.isArray(result.data) ? result.data : []);
+      const result = await client.execute('SELECT * FROM users');
+      return res.status(200).json(result.rows);
     }
+
     if (path === 'admin/users/delete' && req.method === 'POST') {
-      await sb(`users?id=eq.${body.id}`, 'DELETE');
+      await client.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [body.id] });
       return res.status(200).json({ message: 'Deleted' });
     }
+
     if (path === 'admin/users/update-pro' && req.method === 'POST') {
-      await sb(`users?id=eq.${body.id}`, 'PATCH', { is_pro: body.is_pro ? 1 : 0 });
+      await client.execute({
+        sql: 'UPDATE users SET is_pro = ? WHERE id = ?',
+        args: [body.is_pro ? 1 : 0, body.id],
+      });
       return res.status(200).json({ message: 'Updated' });
     }
+
     if (path === 'admin/users/update-admin' && req.method === 'POST') {
-      await sb(`users?id=eq.${body.id}`, 'PATCH', { is_admin: body.is_admin ? 1 : 0 });
+      await client.execute({
+        sql: 'UPDATE users SET is_admin = ? WHERE id = ?',
+        args: [body.is_admin ? 1 : 0, body.id],
+      });
       return res.status(200).json({ message: 'Updated' });
     }
+
     if (path === 'admin/users/update' && req.method === 'POST') {
       const { id, name, email, mobile, level, is_pro, is_admin } = body;
-      await sb(`users?id=eq.${id}`, 'PATCH', { name, email, mobile, level, is_pro, is_admin });
+      await client.execute({
+        sql: `UPDATE users SET name = ?, email = ?, mobile = ?, level = ?, is_pro = ?, is_admin = ? WHERE id = ?`,
+        args: [name, email, mobile, level, is_pro ? 1 : 0, is_admin ? 1 : 0, id],
+      });
       return res.status(200).json({ message: 'Updated' });
     }
 
     // ADMIN PLANS
     if (path === 'admin/plans/create' && req.method === 'POST') {
-      await sb('plans', 'POST', body);
+      const { name, price, interval, features } = body;
+      await client.execute({
+        sql: 'INSERT INTO plans (name, price, interval, features) VALUES (?, ?, ?, ?)',
+        args: [name, price, interval, features || ''],
+      });
       return res.status(201).json({ message: 'Created' });
     }
+
     if (path === 'admin/plans/update' && req.method === 'POST') {
-      await sb(`plans?id=eq.${body.id}`, 'PATCH', { price: body.price, interval: body.interval });
+      await client.execute({
+        sql: 'UPDATE plans SET price = ?, interval = ? WHERE id = ?',
+        args: [body.price, body.interval, body.id],
+      });
       return res.status(200).json({ message: 'Updated' });
     }
+
     if (path === 'admin/plans/delete' && req.method === 'POST') {
-      await sb(`plans?id=eq.${body.id}`, 'DELETE');
+      await client.execute({ sql: 'DELETE FROM plans WHERE id = ?', args: [body.id] });
       return res.status(200).json({ message: 'Deleted' });
     }
 
