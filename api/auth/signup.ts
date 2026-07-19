@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const SUPABASE_URL = 'https://oeuerdnisbplolskepin.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY!;
+const SUPABASE_URL = 'libsql://my-database-paraskolankar-cmyk.aws-ap-northeast-1.turso.io';
+const SUPABASE_KEY = process.env.TURSO_AUTH_TOKEN!;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
