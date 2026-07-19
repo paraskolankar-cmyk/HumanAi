@@ -1,13 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@libsql/client';
 
-const SUPABASE_URL = 'https://oeuerdnisbplolskepin.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY!;
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN!,
+});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
@@ -20,23 +22,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const normalizedEmail = String(email).trim().toLowerCase();
 
   try {
-    const userRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(normalizedEmail)}&select=*`,
-      {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-        },
-      }
-    );
+    const result = await client.execute({
+      sql: 'SELECT * FROM users WHERE email = ?',
+      args: [normalizedEmail],
+    });
 
-    const users = await userRes.json();
-
-    if (!Array.isArray(users) || users.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(401).json({ message: 'Email ya password galat hai.' });
     }
 
-    const user = users[0];
+    const user = result.rows[0] as any;
 
     if (user.password !== String(password)) {
       return res.status(401).json({ message: 'Email ya password galat hai.' });
