@@ -23,29 +23,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const normalizedEmail = String(email).trim().toLowerCase();
 
   try {
-    // 1. Fetch user data
+    // 1. Check if user exists
     const userRes = await client.execute({
       sql: 'SELECT * FROM users WHERE email = ?',
       args: [normalizedEmail],
     });
 
     if (userRes.rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
+      // If user does not exist during POST request, create user automatically
+      if (req.method === 'POST') {
+        await client.execute({
+          sql: `INSERT INTO users (email, name, mobile, level, is_pro, is_admin)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            normalizedEmail,
+            body.name || '',
+            body.mobile || '',
+            body.level || 'Beginner',
+            body.is_pro ? 1 : 0,
+            0
+          ],
+        });
+      } else {
+        return res.status(404).json({ message: 'User not found' });
+      }
     }
 
-    const user = userRes.rows[0] as any;
-
-    // 2. Handle POST Updates (Time spent, Streak, Lessons Completed)
+    // 2. Handle POST Updates (Time spent, Streak, Pro status, Level, Name, etc.)
     if (req.method === 'POST') {
-      const { time_spent, streak, goal_progress, achievements } = body;
+      const { name, mobile, level, is_pro, time_spent, streak, goal_progress, achievements } = body;
       
       const updates: string[] = [];
       const args: any[] = [];
 
-      if (time_spent !== undefined) { updates.push('time_spent = ?'); args.push(time_spent); }
-      if (streak !== undefined) { updates.push('streak = ?'); args.push(streak); }
-      if (goal_progress !== undefined) { updates.push('goal_progress = ?'); args.push(goal_progress); }
-      if (achievements !== undefined) { updates.push('achievements = ?'); args.push(achievements); }
+      if (name !== undefined) { updates.push('name = ?'); args.push(String(name).trim()); }
+      if (mobile !== undefined) { updates.push('mobile = ?'); args.push(String(mobile).trim()); }
+      if (level !== undefined) { updates.push('level = ?'); args.push(level); }
+      if (is_pro !== undefined) { updates.push('is_pro = ?'); args.push(is_pro ? 1 : 0); }
+      if (time_spent !== undefined) { updates.push('time_spent = ?'); args.push(Number(time_spent)); }
+      if (streak !== undefined) { updates.push('streak = ?'); args.push(Number(streak)); }
+      if (goal_progress !== undefined) { updates.push('goal_progress = ?'); args.push(Number(goal_progress)); }
+      if (achievements !== undefined) { updates.push('achievements = ?'); args.push(Number(achievements)); }
 
       if (updates.length > 0) {
         args.push(normalizedEmail);
@@ -56,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 3. Fetch latest dynamic values
+    // 3. Fetch latest database state for user
     const updatedUserRes = await client.execute({
       sql: 'SELECT * FROM users WHERE email = ?',
       args: [normalizedEmail],
@@ -64,20 +82,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     const freshUser = updatedUserRes.rows[0] as any;
 
-    // Dynamic fallback values if columns are empty
+    // Return full profile state including Pro Status & Dynamic Stats
     return res.status(200).json({
+      id: freshUser.id,
+      email: freshUser.email,
+      name: freshUser.name || '',
+      mobile: freshUser.mobile || '',
+      level: freshUser.level || 'Beginner',
+      is_pro: Boolean(freshUser.is_pro), // Ensure Pro status is returned as boolean
+      is_admin: Boolean(freshUser.is_admin),
       streak: freshUser.streak ?? 0,
       time_spent: freshUser.time_spent ?? 0,
       goal_progress: freshUser.goal_progress ?? 0,
       achievements: freshUser.achievements ?? 0,
       graph_data: [
-        { day: 'Mon', progress: freshUser.mon_progress || 10 },
-        { day: 'Tue', progress: freshUser.tue_progress || 25 },
-        { day: 'Wed', progress: freshUser.wed_progress || 40 },
-        { day: 'Thu', progress: freshUser.thu_progress || 30 },
-        { day: 'Fri', progress: freshUser.fri_progress || 60 },
-        { day: 'Sat', progress: freshUser.sat_progress || 80 },
-        { day: 'Sun', progress: freshUser.sun_progress || freshUser.goal_progress || 90 },
+        { day: 'Mon', progress: freshUser.mon_progress ?? 10 },
+        { day: 'Tue', progress: freshUser.tue_progress ?? 25 },
+        { day: 'Wed', progress: freshUser.wed_progress ?? 40 },
+        { day: 'Thu', progress: freshUser.thu_progress ?? 30 },
+        { day: 'Fri', progress: freshUser.fri_progress ?? 60 },
+        { day: 'Sat', progress: freshUser.sat_progress ?? 80 },
+        { day: 'Sun', progress: freshUser.sun_progress ?? freshUser.goal_progress ?? 90 },
       ]
     });
 
