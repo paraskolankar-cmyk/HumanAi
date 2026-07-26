@@ -52,7 +52,7 @@ export default function Auth({ onLogin, isDarkMode }: AuthProps) {
     try {
       if (isLogin) {
         // --- SECURE LOGIN MODE (RELATIVE PATH APPLIED) ---
-        const res = await fetch('/api/auth/login', {
+        const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
