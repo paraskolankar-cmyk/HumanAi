@@ -14,7 +14,8 @@ import {
   Check,
   ChevronLeft,
   Shield,
-  HelpCircle
+  HelpCircle,
+  Award
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { humanAiService } from '@/src/services/geminiService';
@@ -107,7 +108,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       : dailyTasks.mcqs[taskIndex]
   ) : null;
 
-  // Helper normalization function for sentence comparison
   const normalizeText = (str: string) => {
     return (str || '')
       .trim()
@@ -162,7 +162,9 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     
     setFeedback({
       status: isCorrect ? 'correct' : 'incorrect',
-      text: isCorrect ? (taskType === 'translations' ? 'Correct Translation!' : 'Perfect pronunciation!') : `You said: "${transcript}". Try again!`
+      text: isCorrect 
+        ? (taskType === 'translations' ? 'Correct Translation!' : 'Perfect pronunciation!') 
+        : `You said: "${transcript}". Try again!`
     });
     setShowTranslation(true);
   };
@@ -187,6 +189,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setFeedback({ status: null, text: '' });
     setShowTranslation(false);
     setUserArrangement([]);
+    setSelectedOption(null);
     if (taskType === 'sentences' || taskType === 'translations') {
       toggleRecording();
     }
@@ -273,14 +276,11 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     if (normalizeText(option) === normalizeText(correctAnswer)) {
       setFeedback({ status: 'correct', text: `Correct! ${explanation || ''}` });
     } else {
-      setFeedback({ status: 'incorrect', text: `Incorrect. Try again! ${explanation || ''}` });
-      setTimeout(() => {
-        setSelectedOption(null);
-      }, 1500);
+      setFeedback({ status: 'incorrect', text: `Incorrect choice. Try again! ${explanation || ''}` });
     }
+    setShowTranslation(true);
   };
 
-  // Check sentence arrangement
   const handleCheckArrangement = () => {
     if (!currentSubTask) return;
     const result = userArrangement.join(' ');
@@ -291,9 +291,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     } else {
       setFeedback({ 
         status: 'incorrect', 
-        text: `Incorrect arrangement. Expected: "${currentSubTask.correct}"` 
+        text: 'Incorrect arrangement. Check the full translation below and try again.' 
       });
     }
+    setShowTranslation(true);
   };
 
   const nextSubTask = () => {
@@ -347,6 +348,27 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         setTaskIndex(taskIndex + 1);
       }
     }
+  };
+
+  // Calculating total numbers of questions & current attempt index
+  const getCurrentQuestionNumber = () => {
+    if (!dailyTasks) return 1;
+    const sentenceCount = dailyTasks.sentences?.length || 0;
+    const translationCount = dailyTasks.translations?.length || 0;
+    const arrangementCount = dailyTasks.arrangements?.length || 0;
+
+    if (taskType === 'sentences') return taskIndex + 1;
+    if (taskType === 'translations') return sentenceCount + taskIndex + 1;
+    if (taskType === 'arrangements') return sentenceCount + translationCount + taskIndex + 1;
+    return sentenceCount + translationCount + arrangementCount + taskIndex + 1;
+  };
+
+  const getTotalQuestionsCount = () => {
+    if (!dailyTasks) return 1;
+    return (dailyTasks.sentences?.length || 0) +
+           (dailyTasks.translations?.length || 0) +
+           (dailyTasks.arrangements?.length || 0) +
+           (dailyTasks.mcqs?.length || 0);
   };
 
   if (view === 'assessment') {
@@ -488,7 +510,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           ))}
         </div>
 
-        {/* Lock Modal */}
         <AnimatePresence>
           {showLockModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -512,34 +533,44 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     return (
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex items-center justify-between">
-          <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] transition-colors">
+          <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors">
             <ChevronLeft size={20} />
             Back to Roadmap
           </button>
-          <div className="text-right">
-            <p className="text-xs font-bold text-[#4F46E5] dark:text-indigo-600 uppercase tracking-wider">Month {selectedMonth} • Day {selectedDay}</p>
-            <h3 className="text-lg font-bold text-[#111827] dark:text-white">
-              {taskType === 'sentences' ? 'Speaking Practice' : taskType === 'translations' ? 'Translation Practice' : taskType === 'arrangements' ? 'Sentence Arrangement' : 'Multiple Choice'}
-            </h3>
+          
+          <div className="text-right flex items-center gap-4">
+            {/* Number of questions counter badge */}
+            <div className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-xs text-[#4F46E5] dark:text-indigo-400 flex items-center gap-1.5 shadow-sm">
+              <span>Question</span>
+              <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
+                {getCurrentQuestionNumber()}
+              </span>
+              <span className="text-gray-400">/</span>
+              <span>{getTotalQuestionsCount()}</span>
+            </div>
+
+            <div>
+              <p className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 uppercase tracking-wider">Month {selectedMonth} • Day {selectedDay}</p>
+              <h3 className="text-lg font-bold text-[#111827] dark:text-white">
+                {taskType === 'sentences' ? 'Speaking Practice' : taskType === 'translations' ? 'Translation Practice' : taskType === 'arrangements' ? 'Sentence Arrangement' : 'Multiple Choice'}
+              </h3>
+            </div>
           </div>
         </div>
 
         <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm overflow-hidden min-h-[500px] flex flex-col">
           <div className="p-10 flex-1 flex flex-col">
+            {/* Top Bar Progress */}
             <div className="flex items-center gap-4 mb-10">
               <div className="flex-1 h-2 bg-[#F3F4F6] dark:bg-gray-800 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-[#4F46E5] dark:bg-indigo-400 transition-all duration-500"
-                  style={{ 
-                    width: `${((
-                      taskType === 'sentences' ? taskIndex + 1 :
-                      taskType === 'translations' ? dailyTasks.sentences.length + taskIndex + 1 :
-                      taskType === 'arrangements' ? dailyTasks.sentences.length + dailyTasks.translations.length + taskIndex + 1 :
-                      dailyTasks.sentences.length + dailyTasks.translations.length + dailyTasks.arrangements.length + taskIndex + 1
-                    ) / (dailyTasks.sentences.length + dailyTasks.translations.length + dailyTasks.arrangements.length + dailyTasks.mcqs.length)) * 100}%` 
-                  }}
+                  style={{ width: `${(getCurrentQuestionNumber() / getTotalQuestionsCount()) * 100}%` }}
                 ></div>
               </div>
+              <span className="text-xs font-bold text-[#111827] dark:text-white">
+                {Math.round((getCurrentQuestionNumber() / getTotalQuestionsCount()) * 100)}%
+              </span>
             </div>
 
             <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8">
@@ -553,9 +584,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     <Languages size={12} />
                     {showTranslation ? 'Hide Meaning' : 'Show Meaning'}
                   </button>
-                  {showTranslation && (
-                    <p className="text-xl text-[#4F46E5] dark:text-indigo-400 font-medium">{currentSubTask.translation}</p>
-                  )}
                   <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
                     <Mic size={32} className="text-white" />
                   </button>
@@ -572,11 +600,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               ) : taskType === 'arrangements' ? (
                 <div className="w-full max-w-xl space-y-8">
                   <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50 space-y-4">
-                    <p className="text-xs font-bold text-[#6B7280] uppercase tracking-wider">Arrange words matching this meaning:</p>
+                    <p className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider">Arrange words matching this meaning:</p>
                     <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask.translation}</h3>
                   </div>
 
-                  {/* Arranged Words Workspace */}
                   <div className="min-h-[60px] p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 items-center justify-center">
                     {userArrangement.map((word, i) => (
                       <button
@@ -584,6 +611,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                         onClick={() => {
                           setUserArrangement(userArrangement.filter((_, idx) => idx !== i));
                           setFeedback({ status: null, text: '' });
+                          setShowTranslation(false);
                         }}
                         className="px-4 py-2 bg-[#4F46E5] text-white rounded-xl font-bold shadow-sm hover:bg-indigo-600 transition-all"
                       >
@@ -595,7 +623,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     )}
                   </div>
 
-                  {/* Available Unused Words */}
                   <div className="flex flex-wrap gap-2 justify-center">
                     {(() => {
                       const availableWords = [...(currentSubTask.jumbled || [])];
@@ -610,6 +637,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                           onClick={() => {
                             setUserArrangement([...userArrangement, word]);
                             setFeedback({ status: null, text: '' });
+                            setShowTranslation(false);
                           }}
                           className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl font-bold text-[#111827] dark:text-white hover:border-[#4F46E5] transition-all"
                         >
@@ -619,12 +647,12 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     })()}
                   </div>
 
-                  {/* Check Answer & Reset Actions */}
                   <div className="flex justify-center gap-4">
                     <button 
                       onClick={() => {
                         setUserArrangement([]);
                         setFeedback({ status: null, text: '' });
+                        setShowTranslation(false);
                       }}
                       className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 flex items-center gap-1"
                     >
@@ -653,8 +681,8 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                         className={`w-full text-left p-4 rounded-2xl border transition-all font-medium ${
                           selectedOption === option
                             ? option === currentSubTask.answer
-                              ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
-                              : 'bg-red-50 border-red-500 text-red-700'
+                              ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                              : 'bg-red-50 border-red-500 text-red-700 dark:bg-red-950/30 dark:text-red-300'
                             : 'bg-white dark:bg-[#1F2937] border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] text-[#111827] dark:text-white'
                         }`}
                       >
@@ -665,24 +693,70 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              {/* Feedback Banner */}
+              {/* Translation Solution Box (Native & English Solution Box) */}
+              <AnimatePresence>
+                {(showTranslation || feedback.status) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="w-full max-w-xl p-5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-left space-y-3 shadow-sm"
+                  >
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                      <Languages size={16} />
+                      <span>Full Translation Solution</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      {/* Native Language Meaning */}
+                      <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+                        <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">{targetLanguage} Meaning:</span>
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">
+                          {currentSubTask?.translation || currentSubTask?.native || 'N/A'}
+                        </p>
+                      </div>
+
+                      {/* English Correct Answer */}
+                      <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+                        <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Correct English:</span>
+                        <div className="flex items-center justify-between">
+                          <p className="font-bold text-indigo-700 dark:text-indigo-300">
+                            {currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer || 'N/A'}
+                          </p>
+                          <button 
+                            onClick={() => handleSpeak(currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer)}
+                            className="p-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 rounded-lg"
+                          >
+                            <Volume2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Feedback Alert Status */}
               <AnimatePresence>
                 {feedback.status && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className={`flex items-center gap-3 px-6 py-4 rounded-2xl border ${
+                    className={`w-full max-w-xl flex items-center justify-between gap-3 px-6 py-4 rounded-2xl border ${
                       feedback.status === 'correct' 
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300' 
                         : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300'
                     }`}
                   >
-                    {feedback.status === 'correct' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
-                    <span className="font-semibold">{feedback.text}</span>
+                    <div className="flex items-center gap-3">
+                      {feedback.status === 'correct' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
+                      <span className="font-semibold text-sm">{feedback.text}</span>
+                    </div>
+
                     {feedback.status === 'incorrect' && (
                       <button 
                         onClick={handleRetake}
-                        className="ml-auto flex items-center gap-1 bg-amber-200 dark:bg-amber-900/40 px-3 py-1 rounded-lg text-amber-900 dark:text-amber-100 font-bold hover:bg-amber-300 transition-colors"
+                        className="flex items-center gap-1 bg-amber-200 dark:bg-amber-900/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-300 transition-colors shrink-0"
                       >
                         <RefreshCw size={14} />
                         Retake
@@ -700,7 +774,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               disabled={feedback.status !== 'correct'}
               className={`px-10 py-3 rounded-xl font-bold flex items-center gap-2 transition-all ${
                 feedback.status === 'correct' 
-                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black' 
+                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black dark:hover:bg-indigo-700 shadow-lg shadow-gray-200 dark:shadow-none' 
                   : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
               }`}
             >
