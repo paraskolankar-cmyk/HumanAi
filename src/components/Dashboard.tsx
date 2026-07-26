@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
-  LineChart, 
-  Line, 
   XAxis, 
   YAxis, 
-  CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
   AreaChart,
@@ -15,21 +12,10 @@ import {
   Clock, 
   Target, 
   Award,
-  ChevronRight,
   Play,
   CheckCircle2,
   BookOpen
 } from 'lucide-react';
-
-const data = [
-  { name: 'Mon', score: 65 },
-  { name: 'Tue', score: 72 },
-  { name: 'Wed', score: 68 },
-  { name: 'Thu', score: 85 },
-  { name: 'Fri', score: 78 },
-  { name: 'Sat', score: 90 },
-  { name: 'Sun', score: 88 },
-];
 
 interface DashboardProps {
   onTabChange?: (tabId: string) => void;
@@ -40,7 +26,7 @@ interface DashboardProps {
   isPro?: boolean;
 }
 
-export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, userEmail, userName, isPro }: DashboardProps) {
+export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName, isPro }: DashboardProps) {
   const [stats, setStats] = useState({
     streak: 0,
     timeSpent: '45 mins',
@@ -55,25 +41,37 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
     totalCompleted: 0
   });
 
+  // Dynamic Chart Data State
+  const [chartData, setChartData] = useState([
+    { name: 'Mon', score: 0 },
+    { name: 'Tue', score: 0 },
+    { name: 'Wed', score: 0 },
+    { name: 'Thu', score: 0 },
+    { name: 'Fri', score: 0 },
+    { name: 'Sat', score: 0 },
+    { name: 'Sun', score: 0 },
+  ]);
+
   useEffect(() => {
-    // Load progress from localStorage
+    // 1. LocalStorage Fallback Calculation
     const completedDays = JSON.parse(localStorage.getItem('humnai_completed_days') || '{}');
     const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
     
     const dayCount = Object.keys(completedDays).length;
     const lessonCount = Object.keys(completedLessons).length;
     
-    // Calculate category specific progress (rough estimation based on lesson IDs)
     const vocabCount = Object.keys(completedLessons).filter(id => id.startsWith('vocab')).length;
     const grammarCount = Object.keys(completedLessons).filter(id => id.startsWith('grammar')).length;
     const tensesCount = Object.keys(completedLessons).filter(id => id.startsWith('tenses')).length;
 
-    setStats(prev => ({
-      ...prev,
+    const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
+
+    setStats({
       streak: dayCount,
-      progress: Math.min(100, Math.round((lessonCount / 20) * 100)), // Assuming 20 total lessons for now
+      timeSpent: `${Math.max(15, lessonCount * 15)} mins`,
+      progress: calcProgress,
       badges: Math.floor(lessonCount / 3)
-    }));
+    });
 
     setLearningStats({
       vocab: vocabCount,
@@ -81,7 +79,43 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
       tenses: tensesCount,
       totalCompleted: lessonCount
     });
-  }, []);
+
+    // 2. Fetch Live Dynamic Data from Database
+    if (userEmail) {
+      fetch(`/api/sync?email=${encodeURIComponent(userEmail)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && !data.error) {
+            setStats(prev => ({
+              ...prev,
+              streak: data.streak ?? prev.streak,
+              timeSpent: data.time_spent ? `${data.time_spent} mins` : prev.timeSpent,
+              progress: data.goal_progress ?? prev.progress,
+              badges: data.achievements ?? prev.badges
+            }));
+
+            if (Array.isArray(data.graph_data) && data.graph_data.length > 0) {
+              setChartData(data.graph_data.map((item: any) => ({
+                name: item.day,
+                score: item.progress || 0
+              })));
+            }
+          }
+        })
+        .catch(err => console.error("Sync fetch error:", err));
+    } else {
+      // Dynamic Chart fallback based on local completed lessons
+      setChartData([
+        { name: 'Mon', score: Math.min(100, lessonCount * 10) },
+        { name: 'Tue', score: Math.min(100, lessonCount * 15) },
+        { name: 'Wed', score: Math.min(100, lessonCount * 20) },
+        { name: 'Thu', score: Math.min(100, lessonCount * 25) },
+        { name: 'Fri', score: Math.min(100, lessonCount * 30) },
+        { name: 'Sat', score: Math.min(100, lessonCount * 35) },
+        { name: 'Sun', score: calcProgress },
+      ]);
+    }
+  }, [userEmail]);
 
   return (
     <div className="space-y-8 pb-20 md:pb-8">
@@ -110,7 +144,6 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
             Continue Learning
           </button>
         </div>
-        {/* Abstract Shapes */}
         <div className="absolute top-[-20%] right-[-10%] w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
         <div className="absolute bottom-[-20%] left-[20%] w-48 h-48 bg-indigo-400/20 rounded-full blur-2xl"></div>
       </div>
@@ -135,8 +168,8 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
 
       {/* Learning Report & Progress Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Progress Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-[#1F2937] p-8 rounded-3xl shadow-sm">
+        {/* Dynamic Progress Chart */}
+        <div className="lg:col-span-2 bg-white dark:bg-[#1F2937] p-8 rounded-3xl shadow-sm border border-[#E5E7EB] dark:border-gray-700">
           <div className="flex items-center justify-between mb-8">
             <div>
               <h3 className="text-xl font-bold text-[#111827] dark:text-white">Learning Progress</h3>
@@ -149,7 +182,7 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
           </div>
           <div className="h-[300px] w-full outline-none" tabIndex={-1}>
             <ResponsiveContainer width="100%" height="100%" className="outline-none">
-              <AreaChart data={data} className="outline-none">
+              <AreaChart data={chartData} className="outline-none">
                 <defs>
                   <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#4F46E5" stopOpacity={0.1}/>
@@ -207,7 +240,7 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
                   <span className="text-sm text-[#6B7280] dark:text-gray-400">{learningStats.vocab} Lessons</span>
                 </div>
                 <div className="w-full bg-gray-100 dark:bg-gray-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-500 h-full" style={{ width: `${Math.min(100, (learningStats.vocab / 4) * 100)}%` }}></div>
+                  <div className="bg-blue-500 h-full transition-all" style={{ width: `${Math.min(100, (learningStats.vocab / 4) * 100)}%` }}></div>
                 </div>
               </div>
             </div>
@@ -222,7 +255,7 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
                   <span className="text-sm text-[#6B7280] dark:text-gray-400">{learningStats.grammar} Lessons</span>
                 </div>
                 <div className="w-full bg-gray-100 dark:bg-gray-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-purple-500 h-full" style={{ width: `${Math.min(100, (learningStats.grammar / 4) * 100)}%` }}></div>
+                  <div className="bg-purple-500 h-full transition-all" style={{ width: `${Math.min(100, (learningStats.grammar / 4) * 100)}%` }}></div>
                 </div>
               </div>
             </div>
@@ -237,7 +270,7 @@ export default function Dashboard({ onTabChange, isDarkMode, onThemeToggle, user
                   <span className="text-sm text-[#6B7280] dark:text-gray-400">{learningStats.tenses} Lessons</span>
                 </div>
                 <div className="w-full bg-gray-100 dark:bg-gray-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-emerald-500 h-full" style={{ width: `${Math.min(100, (learningStats.tenses / 4) * 100)}%` }}></div>
+                  <div className="bg-emerald-500 h-full transition-all" style={{ width: `${Math.min(100, (learningStats.tenses / 4) * 100)}%` }}></div>
                 </div>
               </div>
             </div>
