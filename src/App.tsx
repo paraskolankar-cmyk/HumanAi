@@ -52,6 +52,42 @@ export default function App() {
   const [lastTranslatedLang, setLastTranslatedLang] = useState<string | null>(null);
   const [isTranslatingTrial, setIsTranslatingTrial] = useState(false);
 
+  // Live Live Sync Effect for Database Pro Status
+  useEffect(() => {
+    const syncLiveUserStatus = async () => {
+      const email = userEmail || localStorage.getItem('humnai_user_email');
+      if (!email || !isAuthenticated) return;
+
+      try {
+        const res = await fetch(`/api/sync?email=${encodeURIComponent(email)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.is_pro !== undefined) {
+            const isUserPro = Boolean(data.is_pro) || email.includes('admin');
+            setIsPro(isUserPro);
+            localStorage.setItem('humnai_is_pro', String(isUserPro));
+          }
+          if (data && data.is_admin !== undefined) {
+            const isUserAdmin = Boolean(data.is_admin) || email.includes('admin');
+            setIsAdmin(isUserAdmin);
+            localStorage.setItem('humnai_is_admin', String(isUserAdmin));
+          }
+        }
+      } catch (err) {
+        console.error("Live Pro status sync error:", err);
+      }
+    };
+
+    syncLiveUserStatus();
+
+    // Background interval to check every 8 seconds if Admin updated user's Pro status
+    const interval = setInterval(() => {
+      syncLiveUserStatus();
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [userEmail, isAuthenticated]);
+
   useEffect(() => {
     const checkTrial = async () => {
       if (isAuthenticated && !isPro && activeTab !== 'pricing' && activeTab !== 'profile') {
@@ -70,7 +106,6 @@ export default function App() {
           
           const nativeLang = localStorage.getItem('humnai_user_language') || 'Hindi';
           
-          // Translate if not already translated OR if language changed
           if ((!trialTranslations || lastTranslatedLang !== nativeLang) && !isTranslatingTrial) {
             setIsTranslatingTrial(true);
             try {
@@ -141,7 +176,6 @@ export default function App() {
       setUserName(localStorage.getItem('humnai_user_name'));
       setIsAdmin(localStorage.getItem('humnai_is_admin') === 'true' || email.includes('admin'));
       
-      // Sync from DB
       dbService.getUser(email).then(user => {
         if (user) {
           if (user.name) {
@@ -170,8 +204,6 @@ export default function App() {
             localStorage.setItem('humnai_completed_days', JSON.stringify(user.progress));
           }
         } else {
-          // AUTO-RECOVERY FOR SERVERLESS: If user info is lost due to Vercel ephemeral database resets,
-          // re-sync stored profile from localStorage back to database!
           const storedName = localStorage.getItem('humnai_user_name') || email.split('@')[0];
           const storedMobile = localStorage.getItem('humnai_user_mobile') || undefined;
           const storedIsPro = localStorage.getItem('humnai_is_pro') === 'true';
@@ -216,7 +248,6 @@ export default function App() {
     if (name) localStorage.setItem('humnai_user_name', name);
     if (mobile) localStorage.setItem('humnai_user_mobile', mobile);
 
-    // Sync with DB
     const userData = await dbService.syncUser({ email, name, mobile });
     
     if (userData.is_pro || isUserAdmin) {
@@ -315,7 +346,7 @@ export default function App() {
           </button>
           <div 
             onClick={() => setActiveTab('profile')}
-            className="w-8 h-8 rounded-full bg-[#E5E7EB] dark:bg-gray-700 flex items-center justify-center overflow-hidden border border-[#E5E7EB] dark:border-gray-600"
+            className="w-8 h-8 rounded-full bg-[#E5E7EB] dark:bg-gray-700 flex items-center justify-center overflow-hidden border border-[#E5E7EB] dark:border-gray-600 cursor-pointer"
           >
             <User size={16} className="text-[#9CA3AF] dark:text-gray-400" />
           </div>
@@ -374,7 +405,9 @@ export default function App() {
                   </div>
                   <div>
                     <p className="font-bold text-gray-900 dark:text-white">{userName || 'User'}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Intermediate Level</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {isPro ? 'Pro Member' : 'Free Member'}
+                    </p>
                   </div>
                 </div>
                 <button 
@@ -444,8 +477,14 @@ export default function App() {
             </div>
             {!isSidebarCollapsed && (
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-semibold text-[#111827] dark:text-white truncate">{userName || 'Rahul Sharma'}</p>
-                <p className="text-xs text-[#6B7280] dark:text-gray-400 truncate">Intermediate</p>
+                <p className="text-sm font-semibold text-[#111827] dark:text-white truncate">{userName || 'User'}</p>
+                <p className="text-xs text-[#6B7280] dark:text-gray-400 truncate flex items-center gap-1">
+                  {isPro ? (
+                    <span className="text-amber-500 font-bold">Pro Active</span>
+                  ) : (
+                    <span>Free Plan</span>
+                  )}
+                </p>
               </div>
             )}
           </div>
@@ -483,10 +522,6 @@ export default function App() {
             </h2>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 dark:bg-orange-900/20 rounded-full border border-orange-100 dark:border-orange-900/30">
-              <span className="text-sm font-bold text-orange-700 dark:text-orange-400">Day 12 Streak</span>
-              <span className="text-orange-500">🔥</span>
-            </div>
             <button className="p-2 text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800 rounded-full relative transition-colors">
               <Bell size={20} />
               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
@@ -547,7 +582,6 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
                 className="relative bg-white dark:bg-[#1F2937] rounded-[2.5rem] shadow-2xl border border-[#E5E7EB] dark:border-gray-700 p-8 md:p-10 max-w-md w-full overflow-hidden"
               >
-                {/* Decorative Background */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl -mr-16 -mt-16" />
                 <div className="absolute bottom-0 left-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl -ml-12 -mb-12" />
 
@@ -600,8 +634,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* Footer Text */}
-        <footer className="p-8 mt-auto border-t border-gray-100 text-center">
+        <footer className="p-8 mt-auto border-t border-gray-100 dark:border-gray-800 text-center">
           <p className="text-sm font-medium text-gray-400 italic">
             Practice english with <span className="text-indigo-500 font-bold">HumnAi</span> just like a human.
           </p>
