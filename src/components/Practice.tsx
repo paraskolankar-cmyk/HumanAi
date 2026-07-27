@@ -297,7 +297,8 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setShowTranslation(true);
   };
 
-  const nextSubTask = () => {
+  // UPDATED NEXT SUBTASK WITH REAL-TIME DATABASE SYNC
+  const nextSubTask = async () => {
     setFeedback({ status: null, text: '' });
     setShowTranslation(false);
     setSelectedOption(null);
@@ -312,9 +313,34 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       const newCompleted = { ...completedDays, [dayKey]: true, [nextDayKey]: true };
       setCompletedDays(newCompleted);
       localStorage.setItem('humnai_completed_days', JSON.stringify(newCompleted));
-      
-      const email = localStorage.getItem('humnai_user_email');
+
+      // Track completed lesson for progress graph
+      const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
+      completedLessons[`lesson_${selectedMonth}_${selectedDay}`] = true;
+      localStorage.setItem('humnai_completed_lessons', JSON.stringify(completedLessons));
+
+      const email = userEmail || localStorage.getItem('humnai_user_email');
       if (email) {
+        const lessonCount = Object.keys(completedLessons).length;
+        const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
+
+        // POST sync request to update DB Graph & Streak
+        try {
+          await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              streak: Object.keys(newCompleted).length,
+              time_spent: Math.max(15, lessonCount * 15),
+              goal_progress: calcProgress,
+              achievements: Math.floor(lessonCount / 3)
+            })
+          });
+        } catch (err) {
+          console.error("Failed to sync progress to server:", err);
+        }
+
         dbService.syncUser({
           email,
           progress: newCompleted
@@ -350,7 +376,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
-  // Calculating total numbers of questions & current attempt index
   const getCurrentQuestionNumber = () => {
     if (!dailyTasks) return 1;
     const sentenceCount = dailyTasks.sentences?.length || 0;
@@ -539,7 +564,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           </button>
           
           <div className="text-right flex items-center gap-4">
-            {/* Number of questions counter badge */}
             <div className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-xs text-[#4F46E5] dark:text-indigo-400 flex items-center gap-1.5 shadow-sm">
               <span>Question</span>
               <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
@@ -560,7 +584,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
 
         <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm overflow-hidden min-h-[500px] flex flex-col">
           <div className="p-10 flex-1 flex flex-col">
-            {/* Top Bar Progress */}
             <div className="flex items-center gap-4 mb-10">
               <div className="flex-1 h-2 bg-[#F3F4F6] dark:bg-gray-800 rounded-full overflow-hidden">
                 <div 
@@ -693,7 +716,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              {/* Translation Solution Box (Native & English Solution Box) */}
+              {/* Translation Solution Box */}
               <AnimatePresence>
                 {(showTranslation || feedback.status) && (
                   <motion.div
@@ -708,7 +731,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                      {/* Native Language Meaning */}
                       <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
                         <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">{targetLanguage} Meaning:</span>
                         <p className="font-semibold text-gray-800 dark:text-gray-200">
@@ -716,7 +738,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                         </p>
                       </div>
 
-                      {/* English Correct Answer */}
                       <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
                         <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Correct English:</span>
                         <div className="flex items-center justify-between">
