@@ -48,78 +48,86 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
   const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
-    // LocalStorage Data Calculation
-    const completedDays = JSON.parse(localStorage.getItem('humnai_completed_days') || '{}');
-    const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
-    
-    const dayCount = Object.keys(completedDays).length;
-    const lessonCount = Object.keys(completedLessons).length;
-    
-    const vocabCount = Object.keys(completedLessons).filter(id => id.startsWith('vocab')).length;
-    const grammarCount = Object.keys(completedLessons).filter(id => id.startsWith('grammar')).length;
-    const tensesCount = Object.keys(completedLessons).filter(id => id.startsWith('tenses')).length;
+    // 1. Function to fetch and reload all stats dynamically
+    const loadRealtimeStats = () => {
+      const completedDays = JSON.parse(localStorage.getItem('humnai_completed_days') || '{}');
+      const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
+      
+      const dayCount = Object.keys(completedDays).length;
+      const lessonCount = Object.keys(completedLessons).length;
+      
+      const vocabCount = Object.keys(completedLessons).filter(id => id.includes('vocab')).length;
+      const grammarCount = Object.keys(completedLessons).filter(id => id.includes('grammar')).length;
+      const tensesCount = Object.keys(completedLessons).filter(id => id.includes('tenses')).length;
 
-    const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
+      const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
 
-    setStats({
-      streak: dayCount,
-      timeSpent: `${Math.max(15, lessonCount * 15)} mins`,
-      progress: calcProgress,
-      badges: Math.floor(lessonCount / 3)
-    });
+      setStats({
+        streak: dayCount,
+        timeSpent: `${Math.max(15, lessonCount * 15)} mins`,
+        progress: calcProgress,
+        badges: Math.floor(lessonCount / 3)
+      });
 
-    setLearningStats({
-      vocab: vocabCount,
-      grammar: grammarCount,
-      tenses: tensesCount,
-      totalCompleted: lessonCount
-    });
+      setLearningStats({
+        vocab: vocabCount,
+        grammar: grammarCount,
+        tenses: tensesCount,
+        totalCompleted: lessonCount
+      });
 
-    // Generate Dynamic Chart Data Based on Filter
-    if (timeRange === '7') {
-      setChartData([
-        { name: 'Mon', score: Math.min(100, lessonCount * 8 + 10) },
-        { name: 'Tue', score: Math.min(100, lessonCount * 12 + 15) },
-        { name: 'Wed', score: Math.min(100, lessonCount * 15 + 20) },
-        { name: 'Thu', score: Math.min(100, lessonCount * 18 + 10) },
-        { name: 'Fri', score: Math.min(100, lessonCount * 22 + 25) },
-        { name: 'Sat', score: Math.min(100, lessonCount * 25 + 30) },
-        { name: 'Sun', score: calcProgress || 45 },
-      ]);
-    } else {
-      // 30 Days view (Grouped into weeks)
-      setChartData([
-        { name: 'Week 1', score: Math.min(100, lessonCount * 10 + 15) },
-        { name: 'Week 2', score: Math.min(100, lessonCount * 18 + 25) },
-        { name: 'Week 3', score: Math.min(100, lessonCount * 25 + 35) },
-        { name: 'Week 4', score: calcProgress || 65 },
-      ]);
-    }
+      // Local Dynamic Chart Data Calculation
+      if (timeRange === '7') {
+        setChartData([
+          { name: 'Mon', score: Math.min(100, lessonCount * 5 + 10) },
+          { name: 'Tue', score: Math.min(100, lessonCount * 10 + 15) },
+          { name: 'Wed', score: Math.min(100, lessonCount * 15 + 20) },
+          { name: 'Thu', score: Math.min(100, lessonCount * 18 + 25) },
+          { name: 'Fri', score: Math.min(100, lessonCount * 22 + 30) },
+          { name: 'Sat', score: Math.min(100, lessonCount * 25 + 35) },
+          { name: 'Sun', score: calcProgress || 45 },
+        ]);
+      } else {
+        setChartData([
+          { name: 'Week 1', score: Math.min(100, lessonCount * 10 + 15) },
+          { name: 'Week 2', score: Math.min(100, lessonCount * 18 + 25) },
+          { name: 'Week 3', score: Math.min(100, lessonCount * 25 + 35) },
+          { name: 'Week 4', score: calcProgress || 65 },
+        ]);
+      }
 
-    // Fetch Live Dynamic Data from Database if Email exists
-    if (userEmail) {
-      fetch(`/api/sync?email=${encodeURIComponent(userEmail)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && !data.error) {
-            setStats(prev => ({
-              ...prev,
-              streak: data.streak ?? prev.streak,
-              timeSpent: data.time_spent ? `${data.time_spent} mins` : prev.timeSpent,
-              progress: data.goal_progress ?? prev.progress,
-              badges: data.achievements ?? prev.badges
-            }));
+      // 2. Fetch Live Dynamic Data from Database Serverless API
+      if (userEmail) {
+        fetch(`/api/sync?email=${encodeURIComponent(userEmail)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && !data.error) {
+              setStats(prev => ({
+                ...prev,
+                streak: data.streak ?? prev.streak,
+                timeSpent: data.time_spent ? `${data.time_spent} mins` : prev.timeSpent,
+                progress: data.goal_progress ?? prev.progress,
+                badges: data.achievements ?? prev.badges
+              }));
 
-            if (timeRange === '7' && Array.isArray(data.graph_data) && data.graph_data.length > 0) {
-              setChartData(data.graph_data.map((item: any) => ({
-                name: item.day,
-                score: item.progress || 0
-              })));
+              if (timeRange === '7' && Array.isArray(data.graph_data) && data.graph_data.length > 0) {
+                setChartData(data.graph_data.map((item: any) => ({
+                  name: item.day,
+                  score: item.progress || 0
+                })));
+              }
             }
-          }
-        })
-        .catch(err => console.error("Sync fetch error:", err));
-    }
+          })
+          .catch(err => console.error("Sync fetch error:", err));
+      }
+    };
+
+    // Initial Load
+    loadRealtimeStats();
+
+    // Reload when user switches tabs or window gets focus back
+    window.addEventListener('focus', loadRealtimeStats);
+    return () => window.removeEventListener('focus', loadRealtimeStats);
   }, [userEmail, timeRange]);
 
   return (
@@ -183,7 +191,7 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
               </p>
             </div>
 
-            {/* DYNAMIC DROPDOWN FIX */}
+            {/* DYNAMIC DROPDOWN */}
             <select 
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value as '7' | '30')}
