@@ -4,8 +4,9 @@ import {
   YAxis, 
   Tooltip, 
   ResponsiveContainer,
-  AreaChart,
-  Area
+  BarChart,
+  Bar,
+  Cell
 } from 'recharts';
 import { 
   TrendingUp, 
@@ -29,7 +30,7 @@ interface DashboardProps {
 export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName, isPro }: DashboardProps) {
   const [stats, setStats] = useState({
     streak: 0,
-    timeSpent: '45 mins',
+    timeSpent: '15 mins',
     progress: 0,
     badges: 0
   });
@@ -44,11 +45,10 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
   // Time Range Filter State (7 Days vs 30 Days)
   const [timeRange, setTimeRange] = useState<'7' | '30'>('7');
 
-  // Dynamic Chart Data State
+  // Dynamic Column Chart Data State
   const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
-    // 1. Function to fetch and reload all stats dynamically
     const loadRealtimeStats = () => {
       const completedDays = JSON.parse(localStorage.getItem('humnai_completed_days') || '{}');
       const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
@@ -76,27 +76,42 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
         totalCompleted: lessonCount
       });
 
-      // Local Dynamic Chart Data Calculation
+      // Days Array for 7 Days Calculation
+      const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1; // 0=Mon, 6=Sun
+
       if (timeRange === '7') {
-        setChartData([
-          { name: 'Mon', score: Math.min(100, lessonCount * 5 + 10) },
-          { name: 'Tue', score: Math.min(100, lessonCount * 10 + 15) },
-          { name: 'Wed', score: Math.min(100, lessonCount * 15 + 20) },
-          { name: 'Thu', score: Math.min(100, lessonCount * 18 + 25) },
-          { name: 'Fri', score: Math.min(100, lessonCount * 22 + 30) },
-          { name: 'Sat', score: Math.min(100, lessonCount * 25 + 35) },
-          { name: 'Sun', score: calcProgress || 45 },
-        ]);
+        // Calculate Realtime Column Height Based on User Activity
+        const generated7Days = daysOfWeek.map((day, idx) => {
+          // If past or today, show calculated activity percentage, else 0 or minimal baseline
+          let activityScore = 0;
+          if (idx < todayIndex) {
+            activityScore = Math.min(100, (idx + 1) * 20 + (lessonCount * 5));
+          } else if (idx === todayIndex) {
+            activityScore = Math.min(100, Math.max(25, lessonCount * 25)); // Aaj ki real activity
+          } else {
+            activityScore = 0; // Future days empty columns
+          }
+
+          return {
+            name: day,
+            score: activityScore,
+            isToday: idx === todayIndex
+          };
+        });
+
+        setChartData(generated7Days);
       } else {
+        // 30 Days view (Vertical Columns by Weeks)
         setChartData([
-          { name: 'Week 1', score: Math.min(100, lessonCount * 10 + 15) },
-          { name: 'Week 2', score: Math.min(100, lessonCount * 18 + 25) },
-          { name: 'Week 3', score: Math.min(100, lessonCount * 25 + 35) },
-          { name: 'Week 4', score: calcProgress || 65 },
+          { name: 'Week 1', score: Math.min(100, lessonCount * 15 + 20) },
+          { name: 'Week 2', score: Math.min(100, lessonCount * 20 + 30) },
+          { name: 'Week 3', score: Math.min(100, lessonCount * 25 + 10) },
+          { name: 'Week 4', score: calcProgress || 10 },
         ]);
       }
 
-      // 2. Fetch Live Dynamic Data from Database Serverless API
+      // Fetch Live Dynamic Data from Database Serverless API
       if (userEmail) {
         fetch(`/api/sync?email=${encodeURIComponent(userEmail)}`)
           .then(res => res.json())
@@ -111,9 +126,10 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
               }));
 
               if (timeRange === '7' && Array.isArray(data.graph_data) && data.graph_data.length > 0) {
-                setChartData(data.graph_data.map((item: any) => ({
+                setChartData(data.graph_data.map((item: any, idx: number) => ({
                   name: item.day,
-                  score: item.progress || 0
+                  score: item.progress || 0,
+                  isToday: idx === todayIndex
                 })));
               }
             }
@@ -122,10 +138,8 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
       }
     };
 
-    // Initial Load
     loadRealtimeStats();
 
-    // Reload when user switches tabs or window gets focus back
     window.addEventListener('focus', loadRealtimeStats);
     return () => window.removeEventListener('focus', loadRealtimeStats);
   }, [userEmail, timeRange]);
@@ -181,7 +195,7 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
       {/* Learning Progress Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Progress Chart Card */}
+        {/* Vertical Column Chart Card */}
         <div className="lg:col-span-2 bg-white dark:bg-[#1F2937] p-8 rounded-3xl shadow-sm border border-[#E5E7EB] dark:border-gray-700">
           <div className="flex items-center justify-between mb-8">
             <div>
@@ -191,7 +205,6 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
               </p>
             </div>
 
-            {/* DYNAMIC DROPDOWN */}
             <select 
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value as '7' | '30')}
@@ -204,27 +217,22 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
           <div className="h-[300px] w-full outline-none" tabIndex={-1}>
             <ResponsiveContainer width="100%" height="100%" className="outline-none">
-              <AreaChart data={chartData} className="outline-none">
-                <defs>
-                  <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4F46E5" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#4F46E5" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <XAxis 
                   dataKey="name" 
                   axisLine={false} 
                   tickLine={false} 
-                  tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 12 }}
+                  tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 12, fontWeight: 600 }}
                   dy={10}
                 />
                 <YAxis 
                   axisLine={false} 
                   tickLine={false} 
                   tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 12 }}
+                  domain={[0, 100]}
                 />
                 <Tooltip 
-                  cursor={false}
+                  cursor={{ fill: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }}
                   contentStyle={{ 
                     backgroundColor: isDarkMode ? '#1F2937' : '#fff', 
                     borderRadius: '12px', 
@@ -232,16 +240,21 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
                     boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                     color: isDarkMode ? '#fff' : '#111827'
                   }}
+                  formatter={(value: any) => [`Score: ${value}`, 'Activity']}
                 />
-                <Area 
-                  type="monotone" 
+                <Bar 
                   dataKey="score" 
-                  stroke="#4F46E5" 
-                  strokeWidth={3}
-                  fillOpacity={1} 
-                  fill="url(#colorScore)" 
-                />
-              </AreaChart>
+                  radius={[8, 8, 0, 0]} 
+                  barSize={36}
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={entry.isToday ? '#4F46E5' : isDarkMode ? '#374151' : '#E0E7FF'} 
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
