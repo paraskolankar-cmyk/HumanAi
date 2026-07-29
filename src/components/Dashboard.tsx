@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   XAxis, 
   YAxis, 
@@ -30,7 +30,7 @@ interface DashboardProps {
 export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName, isPro }: DashboardProps) {
   const [stats, setStats] = useState({
     streak: 0,
-    timeSpent: '15 mins',
+    timeSpent: '0 mins',
     progress: 0,
     badges: 0
   });
@@ -42,12 +42,74 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
     totalCompleted: 0
   });
 
+  // Active Screen Time Tracker State (In Seconds)
+  const [activeSeconds, setActiveSeconds] = useState<number>(() => {
+    return parseInt(localStorage.getItem('humnai_total_time_seconds') || '0', 10);
+  });
+
+  const activeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Time Range Filter State (7 Days vs 30 Days)
   const [timeRange, setTimeRange] = useState<'7' | '30'>('7');
 
   // Dynamic Column Chart Data State
   const [chartData, setChartData] = useState<any[]>([]);
 
+  // 1. Real-time Active Screen Time Counter
+  useEffect(() => {
+    const startTimer = () => {
+      if (!activeTimerRef.current) {
+        activeTimerRef.current = setInterval(() => {
+          setActiveSeconds((prev) => {
+            const nextTime = prev + 1;
+            localStorage.setItem('humnai_total_time_seconds', nextTime.toString());
+            return nextTime;
+          });
+        }, 1000);
+      }
+    };
+
+    const stopTimer = () => {
+      if (activeTimerRef.current) {
+        clearInterval(activeTimerRef.current);
+        activeTimerRef.current = null;
+      }
+    };
+
+    startTimer();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopTimer();
+      } else {
+        startTimer();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', startTimer);
+    window.addEventListener('blur', stopTimer);
+
+    return () => {
+      stopTimer();
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', startTimer);
+      window.removeEventListener('blur', stopTimer);
+    };
+  }, []);
+
+  // Format Total Seconds to Human Readable Display (e.g. "0 mins", "12 mins", "1 hr 15 mins")
+  const formatTimeSpent = (totalSecs: number): string => {
+    const totalMinutes = Math.floor(totalSecs / 60);
+    if (totalMinutes < 60) {
+      return `${totalMinutes} mins`;
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return `${hours} hr ${mins} mins`;
+  };
+
+  // 2. Load Real-time Stats & Dynamic Sync
   useEffect(() => {
     const loadRealtimeStats = () => {
       const completedDays = JSON.parse(localStorage.getItem('humnai_completed_days') || '{}');
@@ -62,12 +124,13 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
       const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
 
-      setStats({
+      setStats((prev) => ({
+        ...prev,
         streak: dayCount,
-        timeSpent: `${Math.max(15, lessonCount * 15)} mins`,
+        timeSpent: formatTimeSpent(activeSeconds),
         progress: calcProgress,
         badges: Math.floor(lessonCount / 3)
-      });
+      }));
 
       setLearningStats({
         vocab: vocabCount,
@@ -78,19 +141,17 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
       // Days Array for 7 Days Calculation
       const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1; // 0=Mon, 6=Sun
+      const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 
       if (timeRange === '7') {
-        // Calculate Realtime Column Height Based on User Activity
         const generated7Days = daysOfWeek.map((day, idx) => {
-          // If past or today, show calculated activity percentage, else 0 or minimal baseline
           let activityScore = 0;
           if (idx < todayIndex) {
             activityScore = Math.min(100, (idx + 1) * 20 + (lessonCount * 5));
           } else if (idx === todayIndex) {
-            activityScore = Math.min(100, Math.max(25, lessonCount * 25)); // Aaj ki real activity
+            activityScore = Math.min(100, Math.max(0, Math.floor(activeSeconds / 60) * 5)); // Real-time active time score
           } else {
-            activityScore = 0; // Future days empty columns
+            activityScore = 0;
           }
 
           return {
@@ -102,12 +163,11 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
         setChartData(generated7Days);
       } else {
-        // 30 Days view (Vertical Columns by Weeks)
         setChartData([
-          { name: 'Week 1', score: Math.min(100, lessonCount * 15 + 20) },
-          { name: 'Week 2', score: Math.min(100, lessonCount * 20 + 30) },
-          { name: 'Week 3', score: Math.min(100, lessonCount * 25 + 10) },
-          { name: 'Week 4', score: calcProgress || 10 },
+          { name: 'Week 1', score: Math.min(100, lessonCount * 15) },
+          { name: 'Week 2', score: Math.min(100, lessonCount * 20) },
+          { name: 'Week 3', score: Math.min(100, lessonCount * 25) },
+          { name: 'Week 4', score: calcProgress || 0 },
         ]);
       }
 
@@ -120,7 +180,7 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
               setStats(prev => ({
                 ...prev,
                 streak: data.streak ?? prev.streak,
-                timeSpent: data.time_spent ? `${data.time_spent} mins` : prev.timeSpent,
+                timeSpent: data.time_spent ? `${data.time_spent} mins` : formatTimeSpent(activeSeconds),
                 progress: data.goal_progress ?? prev.progress,
                 badges: data.achievements ?? prev.badges
               }));
@@ -142,7 +202,7 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
 
     window.addEventListener('focus', loadRealtimeStats);
     return () => window.removeEventListener('focus', loadRealtimeStats);
-  }, [userEmail, timeRange]);
+  }, [userEmail, timeRange, activeSeconds]);
 
   return (
     <div className="space-y-8 pb-20 md:pb-8">
@@ -179,7 +239,7 @@ export default function Dashboard({ onTabChange, isDarkMode, userEmail, userName
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           { label: 'Daily Streak', value: `${stats.streak} Days`, icon: TrendingUp, color: 'text-orange-500', bg: 'bg-orange-50' },
-          { label: 'Time Spent', value: stats.timeSpent, icon: Clock, color: 'text-blue-500', bg: 'bg-blue-50' },
+          { label: 'Time Spent', value: formatTimeSpent(activeSeconds), icon: Clock, color: 'text-blue-500', bg: 'bg-blue-50' },
           { label: 'Goal Progress', value: `${stats.progress}%`, icon: Target, color: 'text-emerald-500', bg: 'bg-emerald-50' },
           { label: 'Achievements', value: `${stats.badges} Badges`, icon: Award, color: 'text-purple-500', bg: 'bg-purple-50' },
         ].map((stat, i) => (
