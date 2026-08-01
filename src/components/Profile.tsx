@@ -13,9 +13,10 @@ import {
   CreditCard,
   ArrowRight,
   Moon,
-  Sun
+  Sun,
+  ChevronDown
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProfileProps {
   onTabChange?: (tabId: string) => void;
@@ -25,6 +26,28 @@ interface ProfileProps {
   userName: string | null;
   isPro?: boolean;
 }
+
+// Native Languages List
+const NATIVE_LANGUAGES = [
+  'Hindi',
+  'Marathi',
+  'Urdu',
+  'Telugu',
+  'Tamil',
+  'Kannada',
+  'Assamese',
+  'Malayalam',
+  'Bhojpuri',
+  'Bengali',
+  'Odia',
+  'Punjabi',
+  'Gujarati',
+  'Spanish',
+  'French',
+  'German',
+  'Japanese',
+  'English'
+];
 
 export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEmail, userName, isPro }: ProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -50,7 +73,7 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
     avatarUrl: localStorage.getItem('humnai_user_avatar') || null
   });
 
-  // Update profile if props change (e.g. after login or upgrade)
+  // Update profile if props change
   React.useEffect(() => {
     if (userEmail || userName || isPro !== undefined) {
       const parts = (userName || '').split(' ');
@@ -64,11 +87,11 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
     }
   }, [userEmail, userName, isPro]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsEditing(false);
     
-    // Save to localStorage for persistence in this demo
+    // Save to localStorage
     localStorage.setItem('humnai_user_name', `${profile.firstName} ${profile.lastName}`);
     localStorage.setItem('humnai_user_mobile', profile.mobile);
     localStorage.setItem('humnai_user_bio', profile.bio);
@@ -77,6 +100,24 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
       localStorage.setItem('humnai_user_avatar', profile.avatarUrl);
     }
     
+    // Backend API Sync
+    if (profile.email) {
+      try {
+        await fetch('/api/user/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: profile.email,
+            nativeLanguage: profile.nativeLanguage,
+            mobile: profile.mobile,
+            bio: profile.bio
+          })
+        });
+      } catch (err) {
+        console.error("Failed to sync profile with server:", err);
+      }
+    }
+
     setShowSavedToast(true);
     setTimeout(() => setShowSavedToast(false), 3000);
   };
@@ -229,6 +270,7 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
             )}
           </div>
 
+          {/* Appearance Section */}
           <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm space-y-4">
             <h4 className="font-bold text-[#111827] dark:text-white flex items-center gap-2">
               <Sun size={18} className="text-[#4F46E5]" />
@@ -253,6 +295,7 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
             </div>
           </div>
 
+          {/* Account Security */}
           <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm space-y-4">
             <h4 className="font-bold text-[#111827] dark:text-white flex items-center gap-2">
               <Shield size={18} className="text-[#4F46E5]" />
@@ -353,52 +396,44 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
                 />
               </div>
 
+              {/* NATIVE LANGUAGE DROPDOWN SECTION */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider ml-1">Native Language</label>
+                  <label className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider ml-1 flex items-center gap-1">
+                    <Globe size={14} className="text-indigo-600 dark:text-indigo-400" />
+                    Native Language
+                  </label>
                   <div className="relative">
                     <Globe className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
                     <select 
-                       disabled={!isEditing}
-                       value={profile.nativeLanguage}
-                       onChange={(e) => setProfile({...profile, nativeLanguage: e.target.value})}
-                       className="w-full pl-12 pr-4 py-3 bg-[#F9FAFB] dark:bg-gray-800/50 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all disabled:opacity-60 appearance-none dark:text-white"
+                      disabled={!isEditing}
+                      value={profile.nativeLanguage}
+                      onChange={(e) => setProfile({...profile, nativeLanguage: e.target.value})}
+                      className="w-full pl-12 pr-10 py-3 bg-[#F9FAFB] dark:bg-gray-800/50 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all disabled:opacity-60 appearance-none dark:text-white font-medium cursor-pointer"
                     >
-                      <option value="Hindi">Hindi</option>
-                      <option value="Marathi">Marathi</option>
-                      <option value="Urdu">Urdu</option>
-                      <option value="Telugu">Telugu</option>
-                      <option value="Tamil">Tamil</option>
-                      <option value="Kannada">Kannada</option>
-                      <option value="Assamese">Assamese</option>
-                      <option value="Malayalam">Malayalam</option>
-                      <option value="Bhojpuri">Bhojpuri</option>
-                      <option value="Bengali">Bengali</option>
-                      <option value="Odia">Odia</option>
-                      <option value="Spanish">Spanish</option>
-                      <option value="French">French</option>
-                      <option value="German">German</option>
-                      <option value="Japanese">Japanese</option>
-                      <option value="Punjabi">Punjabi</option>
-                      <option value="Gujarati">Gujarati</option>
+                      {NATIVE_LANGUAGES.map((lang) => (
+                        <option key={lang} value={lang} className="dark:bg-gray-800">
+                          {lang}
+                        </option>
+                      ))}
                     </select>
+                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" size={18} />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider ml-1">Notification Prefs</label>
                   <div className="relative">
                     <Bell className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
                     <select 
                       disabled={!isEditing}
-                      className="w-full pl-12 pr-4 py-3 bg-[#F9FAFB] dark:bg-gray-800/50 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all disabled:opacity-60 appearance-none dark:text-white"
+                      className="w-full pl-12 pr-10 py-3 bg-[#F9FAFB] dark:bg-gray-800/50 border border-[#E5E7EB] dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all disabled:opacity-60 appearance-none dark:text-white cursor-pointer"
                     >
                       <option>All Notifications</option>
                       <option>Only Important</option>
                       <option>None</option>
                     </select>
+                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" size={18} />
                   </div>
                 </div>
               </div>
@@ -408,7 +443,7 @@ export default function Profile({ onTabChange, isDarkMode, onThemeToggle, userEm
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   type="submit"
-                  className="w-full bg-[#111827] dark:bg-indigo-600 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black dark:hover:bg-indigo-700 transition-all shadow-lg shadow-gray-200 dark:shadow-none"
+                  className="w-full bg-[#111827] dark:bg-indigo-600 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black dark:hover:bg-indigo-700 transition-all shadow-lg shadow-gray-200 dark:shadow-none cursor-pointer"
                 >
                   <Save size={18} />
                   Save Changes
