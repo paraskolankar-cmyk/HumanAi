@@ -1,10 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
-// 1. User ki profile se Selected Native Language read karne ka function
+// 1. LocalStorage se User ki Native Language read karne ka function
 export function getSelectedLanguageName(): string {
   if (typeof window === 'undefined') return 'Hindi';
   
-  // Profile.tsx me saved keys ('humnai_user_language' ya 'humnai_native_language') check karein
   const savedLang = localStorage.getItem('humnai_user_language') || localStorage.getItem('humnai_native_language') || 'hi';
   
   const languageMap: Record<string, string> = {
@@ -28,11 +27,10 @@ export function getSelectedLanguageName(): string {
     ja: 'Japanese'
   };
 
-  // Agar direct code hai (e.g. 'hi') toh map se name lega, agar direct name saved hai (e.g. 'Marathi') toh wahi return karega
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
-// 2. Multiple Keys Load Karein (Primary + Backup)
+// 2. Primary aur Backup API Keys ka array
 const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY,
   process.env.VITE_PRIMARY_GEMINI_KEY,
@@ -47,7 +45,7 @@ function getAiInstance(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-// Key Limit Overflow Hone Par Next Backup Key Par Switch Karne Ka Logic
+// Limit Exceed Hone Par Next Backup Key Par Switch Karne Ka Logic
 function rotateToBackupKey(): void {
   if (GEMINI_KEYS.length <= 1) return;
   const prevIndex = currentKeyIndex;
@@ -57,7 +55,7 @@ function rotateToBackupKey(): void {
   );
 }
 
-// Retry & Failover Helper Function
+// Automatic Retry & Backup Switch Wrapper
 async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GEMINI_KEYS.length || 3): Promise<T> {
   let lastError: any;
   
@@ -69,9 +67,9 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GE
       lastError = error;
       const errorMessage = error?.message || String(error);
       
-      // Agar 429 Status Code ya Rate Exceeded Error mile
+      // Status 429 / Rate Limit error aane par backup key par switch karein
       if (errorMessage.includes("429") || errorMessage.includes("Rate exceeded") || errorMessage.includes("Quota")) {
-        rotateToBackupKey(); // Next API key par switch karein
+        rotateToBackupKey();
         const delay = Math.pow(2, i) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
@@ -101,7 +99,7 @@ export const getGeminiModel = (modelName = "gemini-2.5-flash") => {
   const ai = getAiInstance();
   return ai.models.generateContent({
     model: modelName,
-    contents: "", // Placeholder
+    contents: "",
   });
 };
 
@@ -135,7 +133,6 @@ export const humanAiService = {
   },
 
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
-    // Agar targetLanguage pass na ho toh profile ki selected language use karein
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
     return withRetry(async (ai) => {
@@ -169,7 +166,6 @@ export const humanAiService = {
   },
 
   async getDailyLearningContent(category: string, level: string, targetLanguage?: string) {
-    // User ki selected language get karein
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
     return withRetry(async (ai) => {
@@ -280,7 +276,6 @@ export const humanAiService = {
   },
 
   async correctSentence(sentence: string, targetLanguage?: string) {
-    // User ki selected language get karein
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
     return withRetry(async (ai) => {
