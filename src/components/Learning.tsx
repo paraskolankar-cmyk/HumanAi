@@ -17,7 +17,10 @@ import {
   Volume2,
   User,
   BrainCircuit,
-  Clock
+  Clock,
+  Calendar,
+  Award,
+  Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService, getSelectedLanguageName } from '../services/geminiService';
@@ -27,14 +30,14 @@ const ICON_MAP: Record<string, any> = {
 };
 
 const MODULES = [
-  { id: 'vocabulary', title: 'Vocabulary', icon: 'Book', color: 'bg-blue-50 text-blue-600', description: 'Learn new words and phrases daily.' },
-  { id: 'grammar', title: 'Grammar', icon: 'Type', color: 'bg-purple-50 text-purple-600', description: 'Master English grammar rules.' },
-  { id: 'tenses', title: 'Tenses', icon: 'Clock', color: 'bg-orange-50 text-orange-600', description: 'Daily tense structure and practice.' },
-  { id: 'syno-anto', title: 'Synonyms & Antonyms', icon: 'Layers', color: 'bg-emerald-50 text-emerald-600', description: 'Learn synonyms and antonyms daily.' },
-  { id: 'noun-pronoun', title: 'Noun & Pronoun', icon: 'User', color: 'bg-pink-50 text-pink-600', description: 'Learn nouns and pronouns with examples.' },
-  { id: 'verbs', title: 'Verbs', icon: 'Mic2', color: 'bg-indigo-50 text-indigo-600', description: 'Master verbs in all 4 forms.' },
-  { id: 'voice-narration', title: 'Voice & Narration', icon: 'Hash', color: 'bg-red-50 text-red-600', description: 'Master Active/Passive voice and Narration.' },
-  { id: 'other-pos', title: 'Advanced Grammar', icon: 'Sparkles', color: 'bg-yellow-50 text-yellow-600', description: 'Adjectives, Conjunctions, Articles & more.' },
+  { id: 'vocabulary', title: 'BlackBook Vocabulary', icon: 'Book', color: 'bg-blue-50 text-blue-600', description: 'Learn 10 high-frequency exam words daily with meanings & native translation.' },
+  { id: 'grammar', title: 'Grammar Essentials', icon: 'Type', color: 'bg-purple-50 text-purple-600', description: 'Master SP Bakshi & Plinth to Paramount error rules.' },
+  { id: 'tenses', title: 'Tenses & Structure', icon: 'Clock', color: 'bg-orange-50 text-orange-600', description: 'Daily tense formulas, rules and sentence transformations.' },
+  { id: 'syno-anto', title: 'Synonyms & Antonyms', icon: 'Layers', color: 'bg-emerald-50 text-emerald-600', description: 'Learn competitive exam repeated word pairs daily.' },
+  { id: 'noun-pronoun', title: 'Noun & Pronoun', icon: 'User', color: 'bg-pink-50 text-pink-600', description: 'Learn nouns and pronouns with error-spotting rules.' },
+  { id: 'verbs', title: 'Verbs (V1 - V4)', icon: 'Mic2', color: 'bg-indigo-50 text-indigo-600', description: 'Master daily verbs in all 4 forms with examples.' },
+  { id: 'voice-narration', title: 'Voice & Narration', icon: 'Hash', color: 'bg-red-50 text-red-600', description: 'Master Active/Passive voice and Direct/Indirect speech.' },
+  { id: 'other-pos', title: 'Advanced Grammar', icon: 'Sparkles', color: 'bg-yellow-50 text-yellow-600', description: 'Adjectives, Conjunctions, Articles & Prepositions.' },
   { id: 'expert-grammar', title: 'Expert Grammar', icon: 'BrainCircuit', color: 'bg-orange-50 text-orange-600', description: 'Infinitive, Participle, Inversion & Mood.' },
 ];
 
@@ -49,6 +52,7 @@ interface LearningProps {
 
 export default function Learning({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired }: LearningProps) {
   const [selectedModule, setSelectedModule] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<number>(1);
   const [content, setContent] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -57,6 +61,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
   const [score, setScore] = useState(0);
   const [isLessonFinished, setIsLessonFinished] = useState(false);
   const [hasReadContent, setHasReadContent] = useState(false);
+  const [isFromCache, setIsFromCache] = useState(false);
   
   const userLevel = localStorage.getItem('humnai_user_level') || 'Beginner';
   const nativeLanguage = getSelectedLanguageName();
@@ -77,11 +82,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
 
   useEffect(() => {
     if (selectedModule) {
-      fetchDailyContent();
+      fetchDailyContent(selectedDay);
     }
-  }, [selectedModule]);
+  }, [selectedModule, selectedDay]);
 
-  const fetchDailyContent = async () => {
+  const fetchDailyContent = async (dayNum: number = 1) => {
     if (!selectedModule) return;
 
     // Restriction: Only Vocabulary is free for non-pro users
@@ -105,7 +110,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       if (selectedModule === 'other-pos') category = 'Other Parts of Speech';
       if (selectedModule === 'expert-grammar') category = 'Expert Grammar';
       
-      const data = await humanAiService.getDailyLearningContent(category!, userLevel, nativeLanguage);
+      const cacheKey = `humnai_cache_module_${category}_day${dayNum}_${nativeLanguage.toLowerCase()}`;
+      const cacheExist = typeof window !== 'undefined' && !!localStorage.getItem(cacheKey);
+      setIsFromCache(cacheExist);
+
+      const data = await humanAiService.getDailyLearningContent(category!, userLevel, dayNum, nativeLanguage);
       
       if (data) {
         setContent(data);
@@ -122,15 +131,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     } catch (error) {
       console.error('Failed to fetch daily content, using fallback structure', error);
       
-      // Structured Fallback Data so Content ALWAYS displays properly
+      // Fallback Content
       const fallbackContent = {
-        topic: `${selectedModule.toUpperCase()} Essential Rules & Practice`,
-        explanation: `Today's lesson focuses on core principles of ${selectedModule} tailored for ${userLevel} level learners.`,
+        topic: `Day ${dayNum}: ${selectedModule.toUpperCase()} Competitive Exam Special`,
+        explanation: `Today's lesson focuses on core principles and repeated exam rules of ${selectedModule} for ${userLevel} level.`,
         explanationTranslation: `Aaj ka yah path ${selectedModule} ke mukhya niyamo aur udaaharano par aadharit hai.`,
         vocabulary: selectedModule === 'vocabulary' ? [
-          { word: "Achieve", meaning: "To accomplish or reach a goal successfully", translation: "Praapt karna / Safal hona", example: "She worked hard to achieve her dreams." },
-          { word: "Fluent", meaning: "Able to express oneself easily and articulately", translation: "Dhaarapravaah bolne yogya", example: "He is fluent in English conversation." },
-          { word: "Confidence", meaning: "A feeling of self-assurance arising from one's appreciation of one's own abilities", translation: "Aatmavishvaas", example: "Practice daily to boost your confidence." }
+          { word: "Achieve", meaning: "To accomplish or reach a goal successfully", translation: "Praapt karna / Safal hona", example: "She worked hard to achieve her dreams.", examNote: "SSC CGL 2022" },
+          { word: "Fluent", meaning: "Able to express oneself easily and articulately", translation: "Dhaarapravaah bolne yogya", example: "He is fluent in English conversation.", examNote: "Repeated Exam Word" },
+          { word: "Confidence", meaning: "A feeling of self-assurance arising from appreciation of one's abilities", translation: "Aatmavishvaas", example: "Practice daily to boost your confidence.", examNote: "Banking IBPS" }
         ] : undefined,
         verbs: selectedModule === 'verbs' ? [
           { v1: "Speak", v2: "Spoke", v3: "Spoken", v4: "Speaking", translation: "Bolna", example: "I speak English fluently." },
@@ -146,7 +155,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
             translation: "Kaun sa vikalp sahi hai?",
             options: ["Correct Option", "Incorrect Option 1", "Incorrect Option 2", "Incorrect Option 3"],
             answer: "Correct Option",
-            explanation: "This is the grammatically correct choice according to English rules."
+            explanation: "This is the grammatically correct choice according to competitive exam rules."
           }
         ]
       };
@@ -199,9 +208,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       }
     } else {
       preferredVoice = voices.find(v => v.lang === lang && (v.name.includes('India') || v.name.includes('Google') || v.name.includes('Microsoft')));
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang === lang);
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+      if (!preferredVoice) {
+        preferredVoice = voices.find(v => v.lang === lang);
+      }
+      if (!preferredVoice) {
+        preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
+      }
+      if (!preferredVoice) {
+        preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+      }
     }
     
     if (preferredVoice) utterance.voice = preferredVoice;
@@ -230,10 +245,10 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
 
   if (isLoading) {
     return (
-      <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center">
         <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
-        <p className="font-bold text-[#111827] dark:text-white">Generating your daily lesson & content...</p>
-        <p className="text-sm text-[#6B7280] dark:text-gray-400">Tailoring content for {userLevel} level in {nativeLanguage}</p>
+        <h3 className="font-bold text-[#111827] dark:text-white text-xl">Loading Competitive Exam Material...</h3>
+        <p className="text-sm text-[#6B7280] dark:text-gray-400">Fetching BlackBook & Standard Exam Rules for Day {selectedDay} in {nativeLanguage}</p>
       </div>
     );
   }
@@ -245,25 +260,63 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
         animate={{ opacity: 1, x: 0 }}
         className="space-y-8 pb-20 max-w-5xl mx-auto"
       >
-        <button 
-          onClick={() => {
-            setSelectedModule(null);
-            setContent(null);
-          }}
-          className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors font-medium cursor-pointer"
-        >
-          <ArrowLeft size={20} />
-          Back to Learning Center
-        </button>
+        {/* Navigation & Day Selector Bar */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <button 
+            onClick={() => {
+              setSelectedModule(null);
+              setContent(null);
+            }}
+            className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors font-medium cursor-pointer"
+          >
+            <ArrowLeft size={20} />
+            Back to Learning Center
+          </button>
 
-        <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-8 shadow-sm">
+          {/* DAY SELECTOR BAR (1 to 30 Days) */}
+          <div className="flex items-center gap-2 overflow-x-auto py-1.5 px-3 bg-gray-100 dark:bg-gray-800 rounded-2xl max-w-full">
+            <Calendar size={16} className="text-indigo-600 dark:text-indigo-400 ml-1 shrink-0" />
+            <span className="text-xs font-bold text-gray-500 uppercase pr-1 shrink-0">Day:</span>
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              {Array.from({ length: 30 }).map((_, idx) => {
+                const d = idx + 1;
+                return (
+                  <button
+                    key={d}
+                    onClick={() => setSelectedDay(d)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                      selectedDay === d 
+                        ? 'bg-[#4F46E5] text-white shadow-sm' 
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Module Header with Exam & Cache Badges */}
+        <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className={`p-3 rounded-2xl ${MODULES.find(m => m.id === selectedModule)?.color || 'bg-indigo-50 text-indigo-600'}`}>
               <BookOpen size={24} />
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">{content.topic || 'Daily Lesson'}</h2>
-              <p className="text-[#6B7280] dark:text-gray-400">Daily {selectedModule} Lesson • {userLevel} Level in {nativeLanguage}</p>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2.5 py-0.5 rounded flex items-center gap-1">
+                  <Award size={12} /> Competitive Exam Pattern
+                </span>
+                {isFromCache && (
+                  <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Database size={12} /> Instant Cached
+                  </span>
+                )}
+              </div>
+              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">{content.topic || `Day ${selectedDay} Lesson`}</h2>
+              <p className="text-sm text-[#6B7280] dark:text-gray-400 mt-1">Day {selectedDay} • {userLevel} Level in {nativeLanguage}</p>
             </div>
           </div>
         </div>
@@ -282,15 +335,31 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 <div className="space-y-4">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
                     <FileText className="text-indigo-600 dark:text-indigo-400" size={20} />
-                    Lesson Explanation
+                    Concept Explanation (English & {nativeLanguage})
                   </h3>
                   <div className="prose prose-indigo max-w-none space-y-3">
                     <p className="text-lg text-[#111827] dark:text-white leading-relaxed">{content.explanation}</p>
                     {content.explanationTranslation && (
                       <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
+                        <span className="text-[10px] uppercase font-bold text-indigo-500 block mb-1">{nativeLanguage} Translation:</span>
                         <p className="text-[#4F46E5] dark:text-indigo-300 font-medium">{content.explanationTranslation}</p>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Rules Array (If available) */}
+              {content.rules && content.rules.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500">Key Error-Spotting Rules:</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {content.rules.map((rule: string, rIdx: number) => (
+                      <div key={rIdx} className="p-3.5 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-100 dark:border-gray-700 flex items-start gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                        <span>{rule}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -313,7 +382,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 <div className="space-y-6">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
                     <Book className="text-blue-600 dark:text-blue-400" size={20} />
-                    Daily Vocabulary Words
+                    BlackBook Exam Vocabulary ({content.vocabulary.length} Words)
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {content.vocabulary.map((item: any, i: number) => (
@@ -321,17 +390,22 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <h4 className="text-xl font-bold text-blue-600 dark:text-blue-400">{item.word}</h4>
-                            <button 
-                              onClick={() => speak(item.word)}
-                              className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
-                            >
-                              <Volume2 size={16} />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {item.examNote && (
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 rounded">{item.examNote}</span>
+                              )}
+                              <button 
+                                onClick={() => speak(item.word)}
+                                className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
+                              >
+                                <Volume2 size={16} />
+                              </button>
+                            </div>
                           </div>
                           <p className="text-[#111827] dark:text-white font-medium">{item.meaning}</p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-400 uppercase">Translation:</span>
-                            <p className="text-[#4F46E5] dark:text-indigo-400 font-bold">{item.translation}</p>
+                          <div className="p-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
+                            <span className="text-[10px] font-bold text-indigo-500 uppercase block">{nativeLanguage} Translation:</span>
+                            <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">{item.translation}</p>
                           </div>
                           {item.example && (
                             <p className="text-sm text-[#6B7280] dark:text-gray-400 italic">
@@ -377,7 +451,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               {/* Examples Display */}
               {content.examples && content.examples.length > 0 && (
                 <div className="space-y-4">
-                  <h3 className="text-xl font-bold text-[#111827] dark:text-white">Examples</h3>
+                  <h3 className="text-xl font-bold text-[#111827] dark:text-white">Exam Pattern Examples & Transformations</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {content.examples.map((ex: any, i: number) => (
                       <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-1">
@@ -395,7 +469,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                   onClick={() => setHasReadContent(true)}
                   className="bg-[#4F46E5] text-white px-12 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-600 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  Start Practice Quiz
+                  Start Practice Quiz ({content.questions?.length || 5} MCQs)
                   <ChevronRight size={20} />
                 </button>
               </div>
@@ -469,7 +543,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                   animate={{ opacity: 1, height: 'auto' }}
                   className={`p-6 rounded-2xl border ${selectedAnswer === content.questions[currentQuestionIndex].answer ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/30' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30'}`}
                 >
-                  <p className="font-bold mb-2 text-[#111827] dark:text-white">Explanation:</p>
+                  <p className="font-bold mb-2 text-[#111827] dark:text-white">Explanation ({nativeLanguage}):</p>
                   <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">{content.questions[currentQuestionIndex].explanation}</p>
                   <button 
                     onClick={nextQuestion}
@@ -492,12 +566,12 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               <Trophy size={48} />
             </div>
             <div className="space-y-2">
-              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">Daily Lesson Complete!</h2>
+              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">Day {selectedDay} Lesson Complete!</h2>
               <p className="text-[#6B7280] dark:text-gray-400 text-lg">You scored {score} out of {content.questions?.length || 0} in today's {selectedModule} practice.</p>
             </div>
             <div className="bg-indigo-50 dark:bg-indigo-900/20 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 inline-block">
               <p className="text-[#4F46E5] dark:text-indigo-400 font-bold">Progress Saved!</p>
-              <p className="text-sm text-indigo-400 dark:text-indigo-300">Come back tomorrow for new content.</p>
+              <p className="text-sm text-indigo-400 dark:text-indigo-300">Proceed to Day {selectedDay < 30 ? selectedDay + 1 : 1} for new material.</p>
             </div>
             <div className="pt-6">
               <button 
@@ -522,7 +596,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-[#111827] dark:text-white">Learning Center</h2>
-          <p className="text-[#6B7280] dark:text-gray-400">Master English fundamentals with daily AI-powered lessons.</p>
+          <p className="text-[#6B7280] dark:text-gray-400">Master English fundamentals & competitive exam preparation in {nativeLanguage}.</p>
         </div>
         <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 px-4 py-2 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
           <CheckCircle2 size={18} />
