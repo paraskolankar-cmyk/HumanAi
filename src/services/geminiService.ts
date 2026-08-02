@@ -165,105 +165,107 @@ export const humanAiService = {
     });
   },
 
-  async getDailyLearningContent(category: string, level: string, targetLanguage?: string) {
+  // HIGHLY OPTIMIZED & CACHED COMPETITIVE EXAM CONTENT GENERATOR
+  async getDailyLearningContent(category: string, level: string, dayNumber: number = 1, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
+    const cacheKey = `humnai_cache_module_${category}_day${dayNumber}_${userLanguage.toLowerCase()}`;
 
+    // 1. LOCAL STORAGE CACHE CHECK (Zero Latency, Instant Load, No AI Quota Usage)
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && (parsed.vocabulary || parsed.explanation || parsed.topic)) {
+            return parsed;
+          }
+        } catch (e) {
+          console.warn("Cache parse failed, generating fresh content...", e);
+        }
+      }
+    }
+
+    // 2. IF NOT CACHED -> CALL GEMINI AI WITH COMPETITIVE EXAM PROMPT
     return withRetry(async (ai) => {
-      const date = new Date().toDateString();
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `You are an AI English Tutor. Generate a daily learning lesson for the category: "${category}" at "${level}" level for today (${date}).
+        contents: `You are an AI English Tutor for Indian Competitive Exams (SSC CGL/CHSL, Banking IBPS/SBI, UPSC, NDA/CDS).
+        Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level.
+
+        SOURCES/STYLE TO ADHERE TO:
+        "Black Book of English Vocabulary", "SP Bakshi Objective General English", and "Plinth to Paramount by Neetu Singh".
+
+        REQUIREMENTS BY CATEGORY:
+        1. Topic: Create a Day ${dayNumber} specific competitive exam topic title.
+        2. Content & Explanation: Provide a detailed, high-level explanation in English AND a complete translation in ${userLanguage}.
         
-        Requirements:
-        1. Topic: Select a specific, relevant topic for today.
-        2. Content: Provide a detailed explanation of the topic in English, with a translation in ${userLanguage}.
-        3. Vocabulary Specific: If category is "Vocabulary", provide exactly 10 words. Each word must have:
-           - word: The English word
-           - meaning: English meaning
-           - translation: Meaning in ${userLanguage}
-           - example: An example sentence in English
-        4. Synonyms & Antonyms Specific: If category is "Synonyms & Antonyms", provide exactly 5 synonyms pairs and 5 antonyms pairs. Each item must have:
-           - word: The main English word
-           - type: "synonym" or "antonym"
-           - target: The synonym or antonym word
-           - meaning: English meaning of the main word
-           - translation: Meaning in ${userLanguage}
-           - example: An example sentence in English
-        5. Noun & Pronoun Specific: If category is "Noun & Pronoun", provide:
-           - explanation: A clear definition of what Nouns and Pronouns are.
-           - nouns: 10 example nouns with translation and example.
-           - pronouns: 10 example pronouns with translation and example.
-        6. Verbs Specific: If category is "Verbs", provide 10 verbs. Each verb must have:
-           - v1: Base form
-           - v2: Past simple
-           - v3: Past participle
-           - v4: Present participle (-ing)
-           - translation: Meaning in ${userLanguage}
-           - example: An example sentence using one of the forms.
-        7. Voice & Narration Specific: If category is "Voice & Narration", provide:
-           - explanation: A clear explanation of Active/Passive Voice or Direct/Indirect Narration rules.
-           - rules: Key rules for transformation.
-           - examples: 10 pairs of examples (e.g., Active vs Passive or Direct vs Indirect) with translations.
-        8. Other Parts of Speech Specific: If category is "Other Parts of Speech", focus on ONE of these: Adjective, Conjunction, Article, Preposition, or Adverb. Provide:
-           - explanation: Definition and usage rules for the selected part of speech.
-           - items: 10 examples of the selected part of speech. Each item must have:
-             - word: The English word/phrase
-             - translation: Meaning in ${userLanguage}
-             - example: An example sentence in English
-        9. Expert Grammar Specific: If category is "Expert Grammar", focus on ONE of these: Infinitive, Participle, Inversion, or Mood. Provide:
-           - explanation: Definition and usage rules for the selected topic.
-           - items: 10 examples/sentences demonstrating the concept. Each item must have:
-             - word: The English sentence/phrase
-             - translation: Meaning in ${userLanguage}
-             - example: A brief note on the structure used.
-        10. Tenses Specific: If category is "Tenses", focus on ONE specific tense structure (e.g., Present Continuous) with its formula, usage, and examples.
-        11. Practice Questions: Provide exactly 10 practice questions related to this topic/vocabulary/synonyms/antonyms/verbs/voice/narration/parts of speech/expert grammar.
-        12. Question Format: Each question should have:
-           - Question text (English)
-           - Translation (${userLanguage})
-           - 4 Options
-           - Correct Answer
-           - Explanation in ${userLanguage}
-        
+        3. Vocabulary Specific (If category is "Vocabulary" or "Synonyms & Antonyms"):
+           - MUST PROVIDE MINIMUM 10 High-Frequency Exam Words/Idioms/Substitutions.
+           - Each item MUST have:
+             * word: English Word
+             * meaning: Clear English meaning
+             * translation: Native meaning in ${userLanguage}
+             * example: A high-level competitive exam pattern example sentence
+             * examNote: Year or exam info (e.g. "Repeated in SSC CGL 2021-2023")
+
+        4. Verbs Specific (If category is "Verbs"):
+           - Provide MINIMUM 10 Competitive Exam Verbs with all 4 forms:
+             * v1: Base form
+             * v2: Past form
+             * v3: Past participle
+             * v4: Present participle (-ing)
+             * translation: Meaning in ${userLanguage}
+             * example: Competitive exam error-spotting example sentence
+
+        5. Noun, Pronoun, Voice, Narration, Tenses & Grammar Specific:
+           - Provide 3-5 Critical Error-Spotting Rules.
+           - Rule explanations in English and ${userLanguage}.
+           - For Tenses: Clear formula/structure string in "tenseStructure".
+           - 5-10 Exam Pattern Sentence Transformations / Examples.
+
+        6. Practice Questions:
+           - Provide EXACTLY 5-10 Competitive Exam Pattern MCQs (Spotting Errors or Fill in the blanks).
+           - Question Text, Translation in ${userLanguage}, 4 Options, Correct Answer, and Detailed Explanation in ${userLanguage}.
+
         Return JSON format:
         {
-          "topic": "Topic Name (e.g., Prepositions of Time)",
+          "topic": "Day ${dayNumber}: Topic Title",
           "explanation": "Detailed explanation in English",
           "explanationTranslation": "Explanation in ${userLanguage}",
           "rules": ["Rule 1", "Rule 2"],
           "vocabulary": [
-            { "word": "Word", "meaning": "English Meaning", "translation": "Native Meaning", "example": "Example sentence" }
+            { "word": "Word", "meaning": "Meaning", "translation": "Native Translation", "example": "Sentence", "examNote": "SSC CGL 2023" }
           ],
           "synonymsAntonyms": [
-            { "word": "Word", "type": "synonym/antonym", "target": "TargetWord", "meaning": "Meaning", "translation": "Native", "example": "Example" }
+            { "word": "Word", "type": "synonym/antonym", "target": "Target", "meaning": "Meaning", "translation": "Native", "example": "Sentence" }
           ],
           "nouns": [
-            { "word": "Word", "translation": "Native", "example": "Example" }
+            { "word": "Noun", "translation": "Native", "example": "Sentence" }
           ],
           "pronouns": [
-            { "word": "Word", "translation": "Native", "example": "Example" }
+            { "word": "Pronoun", "translation": "Native", "example": "Sentence" }
           ],
           "verbs": [
-            { "v1": "go", "v2": "went", "v3": "gone", "v4": "going", "translation": "Native", "example": "Example" }
+            { "v1": "v1", "v2": "v2", "v3": "v3", "v4": "v4", "translation": "Native", "example": "Sentence" }
           ],
           "voiceNarrationExamples": [
-            { "original": "Active/Direct sentence", "transformed": "Passive/Indirect sentence", "translation": "Native translation" }
+            { "original": "Active/Direct", "transformed": "Passive/Indirect", "translation": "Native" }
           ],
           "posItems": [
-            { "word": "Word", "translation": "Native", "example": "Example" }
+            { "word": "Word", "translation": "Native", "example": "Sentence" }
           ],
-          "tenseStructure": "Formula/Structure (only if category is Tenses)",
+          "tenseStructure": "Structure Formula (If category is Tenses)",
           "examples": [
-            { "english": "Example sentence", "translation": "Translation in ${userLanguage}" }
+            { "english": "English sentence", "translation": "Translation in ${userLanguage}" }
           ],
           "questions": [
             {
               "id": 1,
               "question": "Question text",
-              "translation": "Translation",
-              "options": ["A", "B", "C", "D"],
+              "translation": "Translation in ${userLanguage}",
+              "options": ["Option A", "Option B", "Option C", "Option D"],
               "answer": "Correct Option",
-              "explanation": "Why this is correct in ${userLanguage}"
+              "explanation": "Detailed explanation in ${userLanguage}"
             }
           ]
         }`,
@@ -271,7 +273,19 @@ export const humanAiService = {
           responseMimeType: "application/json",
         }
       });
-      return safeJsonParse(response.text);
+
+      const parsed = safeJsonParse(response.text);
+
+      // SAVE TO LOCAL STORAGE CACHE PERMANENTLY
+      if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(parsed));
+        } catch (e) {
+          console.warn("Storage quota full, skipping cache save", e);
+        }
+      }
+
+      return parsed;
     });
   },
 
