@@ -17,13 +17,13 @@ import {
   Volume2,
   User,
   BrainCircuit,
-  Check
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService, getSelectedLanguageName } from '../services/geminiService';
 
 const ICON_MAP: Record<string, any> = {
-  Book, Type, Mic2, FileText, Hash, Layers
+  Book, Type, Mic2, FileText, Hash, Layers, Clock, User, Sparkles, BrainCircuit
 };
 
 const MODULES = [
@@ -107,7 +107,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       
       const data = await humanAiService.getDailyLearningContent(category!, userLevel, nativeLanguage);
       
-      if (data && (data.topic || data.vocabulary || data.questions)) {
+      if (data) {
         setContent(data);
       } else {
         throw new Error("Invalid Content Returned");
@@ -122,22 +122,31 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     } catch (error) {
       console.error('Failed to fetch daily content, using fallback structure', error);
       
-      // Fallback Lesson Dataset to prevent white screen / infinite loading
+      // Structured Fallback Data so Content ALWAYS displays properly
       const fallbackContent = {
-        topic: `${selectedModule.toUpperCase()} Lesson`,
-        explanation: `Today's lesson covers key concepts of ${selectedModule} for ${userLevel} level.`,
-        explanationTranslation: `Aaj ka paath ${selectedModule} ke mukhya niyamo ko samjhaata hai.`,
+        topic: `${selectedModule.toUpperCase()} Essential Rules & Practice`,
+        explanation: `Today's lesson focuses on core principles of ${selectedModule} tailored for ${userLevel} level learners.`,
+        explanationTranslation: `Aaj ka yah path ${selectedModule} ke mukhya niyamo aur udaaharano par aadharit hai.`,
         vocabulary: selectedModule === 'vocabulary' ? [
-          { word: "Achieve", meaning: "To accomplish or reach a goal", translation: "Praapt Karna", example: "She worked hard to achieve her dreams." },
-          { word: "Fluent", meaning: "Able to express oneself easily and accurately", translation: "Dhaarapravaah", example: "He is fluent in English." }
+          { word: "Achieve", meaning: "To accomplish or reach a goal successfully", translation: "Praapt karna / Safal hona", example: "She worked hard to achieve her dreams." },
+          { word: "Fluent", meaning: "Able to express oneself easily and articulately", translation: "Dhaarapravaah bolne yogya", example: "He is fluent in English conversation." },
+          { word: "Confidence", meaning: "A feeling of self-assurance arising from one's appreciation of one's own abilities", translation: "Aatmavishvaas", example: "Practice daily to boost your confidence." }
         ] : undefined,
+        verbs: selectedModule === 'verbs' ? [
+          { v1: "Speak", v2: "Spoke", v3: "Spoken", v4: "Speaking", translation: "Bolna", example: "I speak English fluently." },
+          { v1: "Learn", v2: "Learnt", v3: "Learnt", v4: "Learning", translation: "Seekhna", example: "She is learning grammar." }
+        ] : undefined,
+        examples: [
+          { english: "Consistency is key to mastering English.", translation: "Angrezi seekhne ke liye nirantar abhyaas zaroori hai." },
+          { english: "Practice speaking every single day.", translation: "Roj bolne ka abhyaas karein." }
+        ],
         questions: [
           {
-            question: `Which option is correct for ${selectedModule}?`,
+            question: `Which option accurately applies to today's ${selectedModule} topic?`,
             translation: "Kaun sa vikalp sahi hai?",
-            options: ["Option A (Correct)", "Option B", "Option C", "Option D"],
-            answer: "Option A (Correct)",
-            explanation: "This is the grammatically correct choice."
+            options: ["Correct Option", "Incorrect Option 1", "Incorrect Option 2", "Incorrect Option 3"],
+            answer: "Correct Option",
+            explanation: "This is the grammatically correct choice according to English rules."
           }
         ]
       };
@@ -190,15 +199,9 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       }
     } else {
       preferredVoice = voices.find(v => v.lang === lang && (v.name.includes('India') || v.name.includes('Google') || v.name.includes('Microsoft')));
-      if (!preferredVoice) {
-        preferredVoice = voices.find(v => v.lang === lang);
-      }
-      if (!preferredVoice) {
-        preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
-      }
-      if (!preferredVoice) {
-        preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-      }
+      if (!preferredVoice) preferredVoice = voices.find(v => v.lang === lang);
+      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
+      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
     }
     
     if (preferredVoice) utterance.voice = preferredVoice;
@@ -229,7 +232,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
         <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
-        <p className="font-bold text-[#111827] dark:text-white">Generating your daily lesson...</p>
+        <p className="font-bold text-[#111827] dark:text-white">Generating your daily lesson & content...</p>
         <p className="text-sm text-[#6B7280] dark:text-gray-400">Tailoring content for {userLevel} level in {nativeLanguage}</p>
       </div>
     );
@@ -259,124 +262,40 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               <BookOpen size={24} />
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">{content.topic || 'Daily Module'}</h2>
+              <h2 className="text-3xl font-bold text-[#111827] dark:text-white">{content.topic || 'Daily Lesson'}</h2>
               <p className="text-[#6B7280] dark:text-gray-400">Daily {selectedModule} Lesson • {userLevel} Level in {nativeLanguage}</p>
             </div>
           </div>
         </div>
 
+        {/* 1. LESSON CONTENT DISPLAY VIEW */}
         {!hasReadContent ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-8 space-y-6 shadow-sm">
-              {/* Vocabulary Display */}
-              {selectedModule === 'vocabulary' && content.vocabulary ? (
-                <div className="space-y-6">
-                  <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
-                    <Book className="text-blue-600 dark:text-blue-400" size={20} />
-                    Daily Vocabulary Words
-                  </h3>
-                  <div className="grid grid-cols-1 gap-4">
-                    {content.vocabulary.map((item: any, i: number) => (
-                      <div key={i} className="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-blue-200 dark:hover:border-blue-900/50 transition-all">
-                        <div className="space-y-2 flex-1">
-                          <div className="flex items-center gap-3">
-                            <h4 className="text-xl font-bold text-blue-600 dark:text-blue-400">{item.word}</h4>
-                            <button 
-                              onClick={() => speak(item.word)}
-                              className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
-                            >
-                              <Volume2 size={16} />
-                            </button>
-                          </div>
-                          <p className="text-[#111827] dark:text-white font-medium">{item.meaning}</p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">Translation:</span>
-                            <p className="text-[#4F46E5] dark:text-indigo-400 font-bold">{item.translation}</p>
-                            <button 
-                              onClick={() => speak(item.translation, langMap[nativeLanguage] || 'hi-IN')}
-                              className="p-1 text-indigo-400 hover:text-indigo-600"
-                            >
-                              <Volume2 size={14} />
-                            </button>
-                          </div>
-                          {item.example && (
-                            <p className="text-sm text-[#6B7280] dark:text-gray-400 italic">
-                              <span className="font-bold text-blue-400 not-italic mr-1">Example:</span>
-                              "{item.example}"
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : selectedModule === 'verbs' && content.verbs ? (
-                /* Verbs (V1 - V4) Display */
-                <div className="space-y-8">
-                  <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
-                    <Mic2 className="text-indigo-600 dark:text-indigo-400" size={20} />
-                    Daily Verbs (4 Forms)
-                  </h3>
-                  <div className="grid grid-cols-1 gap-6">
-                    {content.verbs.map((verb: any, i: number) => (
-                      <div key={i} className="bg-white dark:bg-[#1F2937] p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-50 dark:border-gray-700 pb-4">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{verb.v1}</h4>
-                              <button onClick={() => speak(verb.v1)} className="p-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg"><Volume2 size={16} /></button>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <p className="text-lg font-bold text-[#4F46E5] dark:text-indigo-400">{verb.translation}</p>
-                              <button onClick={() => speak(verb.translation, langMap[nativeLanguage] || 'hi-IN')} className="text-indigo-400"><Volume2 size={14} /></button>
-                            </div>
-                          </div>
-                          {verb.example && (
-                            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 flex-1 md:max-w-xs">
-                              <p className="text-sm text-indigo-800 dark:text-indigo-200 italic">"{verb.example}"</p>
-                            </div>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          {[
-                            { label: 'V1 (Base)', value: verb.v1 },
-                            { label: 'V2 (Past)', value: verb.v2 },
-                            { label: 'V3 (Participle)', value: verb.v3 },
-                            { label: 'V4 (-ing)', value: verb.v4 }
-                          ].map((form, idx) => (
-                            <div key={idx} className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700 text-center space-y-1">
-                              <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">{form.label}</p>
-                              <p className="font-bold text-gray-700 dark:text-gray-200">{form.value}</p>
-                              <button onClick={() => speak(form.value)} className="text-gray-400 hover:text-indigo-600"><Volume2 size={12} /></button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                /* Default Lesson Explanation View */
+            <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-8 space-y-8 shadow-sm">
+              
+              {/* General Explanation Section */}
+              {content.explanation && (
                 <div className="space-y-4">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
-                    <FileText className="text-indigo-600 dark:text-indigo-500" size={20} />
+                    <FileText className="text-indigo-600 dark:text-indigo-400" size={20} />
                     Lesson Explanation
                   </h3>
-                  <div className="prose prose-indigo max-w-none">
+                  <div className="prose prose-indigo max-w-none space-y-3">
                     <p className="text-lg text-[#111827] dark:text-white leading-relaxed">{content.explanation}</p>
                     {content.explanationTranslation && (
-                      <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
-                        <p className="text-[#4F46E5] dark:text-indigo-400 font-medium">{content.explanationTranslation}</p>
+                      <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
+                        <p className="text-[#4F46E5] dark:text-indigo-300 font-medium">{content.explanationTranslation}</p>
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
+              {/* Tenses Structure Formula Section */}
               {content.tenseStructure && (
                 <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/30 rounded-2xl p-6">
                   <h4 className="text-orange-800 dark:text-orange-300 font-bold mb-2 flex items-center gap-2">
@@ -389,12 +308,79 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              {selectedModule !== 'vocabulary' && content.examples && (
+              {/* Vocabulary Display */}
+              {content.vocabulary && content.vocabulary.length > 0 && (
+                <div className="space-y-6">
+                  <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
+                    <Book className="text-blue-600 dark:text-blue-400" size={20} />
+                    Daily Vocabulary Words
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {content.vocabulary.map((item: any, i: number) => (
+                      <div key={i} className="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 flex flex-col justify-between gap-3 hover:border-blue-200 transition-all">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xl font-bold text-blue-600 dark:text-blue-400">{item.word}</h4>
+                            <button 
+                              onClick={() => speak(item.word)}
+                              className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
+                            >
+                              <Volume2 size={16} />
+                            </button>
+                          </div>
+                          <p className="text-[#111827] dark:text-white font-medium">{item.meaning}</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400 uppercase">Translation:</span>
+                            <p className="text-[#4F46E5] dark:text-indigo-400 font-bold">{item.translation}</p>
+                          </div>
+                          {item.example && (
+                            <p className="text-sm text-[#6B7280] dark:text-gray-400 italic">
+                              <span className="font-bold text-blue-400 not-italic mr-1">Example:</span>
+                              "{item.example}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Verbs (V1 - V4) Display */}
+              {content.verbs && content.verbs.length > 0 && (
+                <div className="space-y-6">
+                  <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
+                    <Mic2 className="text-indigo-600 dark:text-indigo-400" size={20} />
+                    Daily Verbs (4 Forms)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4">
+                    {content.verbs.map((verb: any, i: number) => (
+                      <div key={i} className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-700 pb-3">
+                          <div>
+                            <h4 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{verb.v1} ({verb.translation})</h4>
+                          </div>
+                          {verb.example && <p className="text-sm text-indigo-800 dark:text-indigo-200 italic">"{verb.example}"</p>}
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                          <div className="p-2 bg-white dark:bg-gray-800 rounded-lg"><span className="text-[10px] text-gray-400 block">V1</span><span className="font-bold">{verb.v1}</span></div>
+                          <div className="p-2 bg-white dark:bg-gray-800 rounded-lg"><span className="text-[10px] text-gray-400 block">V2</span><span className="font-bold">{verb.v2}</span></div>
+                          <div className="p-2 bg-white dark:bg-gray-800 rounded-lg"><span className="text-[10px] text-gray-400 block">V3</span><span className="font-bold">{verb.v3}</span></div>
+                          <div className="p-2 bg-white dark:bg-gray-800 rounded-lg"><span className="text-[10px] text-gray-400 block">V4 (-ing)</span><span className="font-bold">{verb.v4}</span></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Examples Display */}
+              {content.examples && content.examples.length > 0 && (
                 <div className="space-y-4">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white">Examples</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {content.examples.map((ex: any, i: number) => (
-                      <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700">
+                      <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-1">
                         <p className="font-bold text-[#111827] dark:text-white">{ex.english}</p>
                         <p className="text-sm text-[#6B7280] dark:text-gray-400">{ex.translation}</p>
                       </div>
@@ -403,10 +389,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              <div className="flex justify-center pt-6">
+              {/* Start Quiz Action Button */}
+              <div className="flex justify-center pt-6 border-t border-gray-100 dark:border-gray-800">
                 <button 
                   onClick={() => setHasReadContent(true)}
-                  className="bg-[#4F46E5] text-white px-12 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-600 transition-colors flex items-center gap-2 cursor-pointer"
+                  className="bg-[#4F46E5] text-white px-12 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-600 transition-all flex items-center gap-2 cursor-pointer"
                 >
                   Start Practice Quiz
                   <ChevronRight size={20} />
@@ -415,7 +402,8 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
             </div>
           </motion.div>
         ) : !isLessonFinished && content.questions && content.questions.length > 0 ? (
-          /* Practice Quiz Screen */
+          
+          /* 2. PRACTICE QUIZ VIEW */
           <div className="space-y-6">
             <div className="flex items-center justify-between px-4">
               <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400">Question {currentQuestionIndex + 1} of {content.questions.length}</span>
@@ -494,7 +482,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
             </motion.div>
           </div>
         ) : (
-          /* Completion Result Screen */
+          /* 3. LESSON COMPLETE RESULT VIEW */
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
