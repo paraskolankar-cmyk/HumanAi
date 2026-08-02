@@ -15,9 +15,12 @@ import {
   ChevronLeft,
   Shield,
   HelpCircle,
-  Award
+  Award,
+  Trophy,
+  Zap,
+  RotateCcw
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService } from '@/src/services/geminiService';
 import { dbService } from '../services/dbService';
 
@@ -28,9 +31,10 @@ interface PracticeProps {
   userName?: string | null;
   isPro?: boolean;
   onTrialExpired?: () => void;
+  onTabChange?: (tabId: string) => void;
 }
 
-export default function Practice({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired }: PracticeProps) {
+export default function Practice({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired, onTabChange }: PracticeProps) {
   const [assessmentQuestions, setAssessmentQuestions] = useState<any[]>([]);
   const [view, setView] = useState<'assessment' | 'roadmap' | 'practice'>(() => {
     const completed = localStorage.getItem('humnai_assessment_completed');
@@ -87,6 +91,9 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
+
+  // Daily Task Completion Modal State
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
   
   const [taskType, setTaskType] = useState<'sentences' | 'translations' | 'arrangements' | 'mcqs'>('sentences');
   const [taskIndex, setTaskIndex] = useState(0);
@@ -259,7 +266,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     } catch (error: any) {
       console.error("Failed to load tasks", error);
       alert("The AI is currently busy. Please wait a few seconds and try clicking again.");
-    } finally {
+    } fontally {
       setIsLoadingTasks(false);
     }
   };
@@ -297,7 +304,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setShowTranslation(true);
   };
 
-  // UPDATED NEXT SUBTASK WITH REAL-TIME DATABASE SYNC
+  // UPDATED NEXT SUBTASK WITH REAL-TIME DATABASE SYNC & COMPLETION POPUP
   const nextSubTask = async () => {
     setFeedback({ status: null, text: '' });
     setShowTranslation(false);
@@ -347,7 +354,8 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         });
       }
       
-      setView('roadmap');
+      // TRIGGER DAILY TASK COMPLETION POPUP
+      setShowCompletionModal(true);
     } else {
       if (taskType === 'sentences') {
         if (taskIndex < dailyTasks.sentences.length - 1) {
@@ -556,7 +564,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
 
   if (view === 'practice' && dailyTasks && currentSubTask) {
     return (
-      <div className="max-w-4xl mx-auto space-y-8">
+      <div className="max-w-4xl mx-auto space-y-8 relative">
         <div className="flex items-center justify-between">
           <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors">
             <ChevronLeft size={20} />
@@ -795,7 +803,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               disabled={feedback.status !== 'correct'}
               className={`px-10 py-3 rounded-xl font-bold flex items-center gap-2 transition-all ${
                 feedback.status === 'correct' 
-                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black dark:hover:bg-indigo-700 shadow-lg shadow-gray-200 dark:shadow-none' 
+                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black dark:hover:bg-indigo-700 shadow-lg shadow-gray-200 dark:shadow-none cursor-pointer' 
                   : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
               }`}
             >
@@ -804,6 +812,89 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
             </button>
           </div>
         </div>
+
+        {/* DAILY TASK COMPLETION CONGRATULATORY POPUP MODAL */}
+        <AnimatePresence>
+          {showCompletionModal && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.8, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.8, y: 20 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                className="bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl relative overflow-hidden"
+              >
+                <div className="absolute top-[-30%] left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div className="relative mx-auto w-24 h-24 mb-6">
+                  <motion.div 
+                    animate={{ rotate: [0, 10, -10, 0] }}
+                    transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                    className="w-full h-full bg-gradient-to-tr from-amber-400 to-amber-200 rounded-3xl flex items-center justify-center shadow-lg shadow-amber-200 dark:shadow-none"
+                  >
+                    <Trophy size={48} className="text-amber-900" />
+                  </motion.div>
+                  <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-1.5 rounded-full border-2 border-white dark:border-gray-800">
+                    <CheckCircle2 size={18} />
+                  </div>
+                </div>
+
+                <h3 className="text-2xl font-bold text-[#111827] dark:text-white mb-2">
+                  Daily Goal Accomplished! 🎉
+                </h3>
+                <p className="text-sm text-[#6B7280] dark:text-gray-400 mb-6 leading-relaxed">
+                  Great job! You have completed Month {selectedMonth} Day {selectedDay} tasks. Keep up the momentum to build fluency!
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 text-left">
+                    <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider mb-1">
+                      <Zap size={14} /> Streak
+                    </div>
+                    <p className="text-lg font-extrabold text-indigo-900 dark:text-indigo-100">+1 Day Streak</p>
+                  </div>
+
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 text-left">
+                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-wider mb-1">
+                      <Award size={14} /> Progress
+                    </div>
+                    <p className="text-lg font-extrabold text-emerald-900 dark:text-emerald-100">Task Completed</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => {
+                      setShowCompletionModal(false);
+                      setView('roadmap');
+                    }}
+                    className="w-full py-3.5 bg-[#4F46E5] hover:bg-indigo-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer"
+                  >
+                    Back to Roadmap
+                    <ArrowRight size={18} />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowCompletionModal(false);
+                      setTaskType('sentences');
+                      setTaskIndex(0);
+                    }}
+                    className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-300 rounded-2xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <RotateCcw size={16} />
+                    Practice Again
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
