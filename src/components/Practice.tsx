@@ -266,7 +266,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     } catch (error: any) {
       console.error("Failed to load tasks", error);
       alert("The AI is currently busy. Please wait a few seconds and try clicking again.");
-    } fontally {
+    } finally {
       setIsLoadingTasks(false);
     }
   };
