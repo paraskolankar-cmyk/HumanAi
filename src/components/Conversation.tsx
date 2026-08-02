@@ -11,7 +11,7 @@ import {
   Loader2,
   Volume2
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService } from '@/src/services/geminiService';
 import Logo from './Logo';
 import { dbService } from '../services/dbService';
@@ -23,6 +23,7 @@ interface Message {
   correction?: string;
   translation?: string;
   explanation?: string;
+  timestamp?: number;
 }
 
 // Add type for SpeechRecognition
@@ -42,10 +43,15 @@ interface ConversationProps {
   onTrialExpired?: () => void;
 }
 
+const DEFAULT_WELCOME_MESSAGE: Message = { 
+  id: '1', 
+  role: 'ai', 
+  text: "Hello! I'm your AI tutor. How can I help you today?",
+  timestamp: Date.now()
+};
+
 export default function Conversation({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired }: ConversationProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: '1', role: 'ai', text: "Hello! I'm your AI tutor. How can I help you today?" }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([DEFAULT_WELCOME_MESSAGE]);
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -85,27 +91,88 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 1. LOAD CHAT HISTORY WITH 24-HOUR EXPIRATION FILTER
   useEffect(() => {
-    const email = localStorage.getItem('humnai_user_email');
-    if (email) {
-      dbService.getChatHistory(email).then(history => {
-        if (history && history.length > 0) {
-          setMessages(history.map((m: any) => ({
-            id: m.id.toString(),
-            role: m.role,
-            text: m.text,
-            correction: m.correction,
-            translation: m.translation,
-            explanation: m.explanation
-          })));
+    const email = userEmail || localStorage.getItem('humnai_user_email');
+    const storageKey = `humnai_chat_${email || 'guest'}`;
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const loadHistory = async () => {
+      let activeMessages: Message[] = [];
+
+      // A. LocalStorage Check (with Timestamp expiration)
+      const localData = localStorage.getItem(storageKey);
+      if (localData) {
+        try {
+          const parsed = JSON.parse(localData);
+          const savedMessages: Message[] = parsed.messages || [];
+          
+          // Filter out messages older than 24 hours
+          activeMessages = savedMessages.filter(msg => {
+            const msgTime = msg.timestamp || parsed.timestamp || now;
+            return now - msgTime < TWENTY_FOUR_HOURS_MS;
+          });
+
+          // If all messages expired, clear local storage
+          if (activeMessages.length === 0 && savedMessages.length > 0) {
+            localStorage.removeItem(storageKey);
+          }
+        } catch (e) {
+          console.error("Error parsing local chat history:", e);
         }
-      });
-    }
-  }, []);
+      }
+
+      // B. Database Fetch Fallback / Sync
+      if (email && activeMessages.length === 0) {
+        try {
+          const history = await dbService.getChatHistory(email);
+          if (history && history.length > 0) {
+            const dbMessages: Message[] = history.map((m: any) => ({
+              id: m.id?.toString() || Date.now().toString(),
+              role: m.role,
+              text: m.text,
+              correction: m.correction,
+              translation: m.translation,
+              explanation: m.explanation,
+              timestamp: m.created_at ? new Date(m.created_at).getTime() : now
+            }));
+
+            // Filter out database messages older than 24 hours
+            activeMessages = dbMessages.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
+          }
+        } catch (err) {
+          console.error("Failed to load chat history from database:", err);
+        }
+      }
+
+      // Set valid active messages or fallback to default welcome message
+      if (activeMessages.length > 0) {
+        setMessages(activeMessages);
+      } else {
+        setMessages([DEFAULT_WELCOME_MESSAGE]);
+      }
+    };
+
+    loadHistory();
+  }, [userEmail]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Helper to persist messages with timestamp
+  const persistMessages = (updatedMessages: Message[]) => {
+    setMessages(updatedMessages);
+
+    const email = userEmail || localStorage.getItem('humnai_user_email');
+    const storageKey = `humnai_chat_${email || 'guest'}`;
+
+    localStorage.setItem(storageKey, JSON.stringify({
+      messages: updatedMessages,
+      timestamp: Date.now()
+    }));
+  };
 
   // Initialize Speech Recognition once
   useEffect(() => {
@@ -181,7 +248,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const speak = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
     window.speechSynthesis.cancel(); // Stop any current speech
     
-    // Set speaking flag IMMEDIATELY
     isSpeakingRef.current = true;
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -226,7 +292,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const handleVoiceInput = async (transcript: string) => {
     if (!transcript.trim()) return;
 
-    // Stop listening while processing
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -235,16 +300,22 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
     const formattedTranscript = transcript.trim().charAt(0).toUpperCase() + transcript.trim().slice(1);
     
-    // Trial limit: 10 messages for free users
     if (!isPro && messages.length >= 10) {
       if (onTrialExpired) onTrialExpired();
       return;
     }
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: formattedTranscript };
-    setMessages(prev => [...prev, userMsg]);
+    const userMsg: Message = { 
+      id: Date.now().toString(), 
+      role: 'user', 
+      text: formattedTranscript,
+      timestamp: Date.now()
+    };
     
-    const email = localStorage.getItem('humnai_user_email');
+    const updatedMessages = [...messages, userMsg];
+    persistMessages(updatedMessages);
+    
+    const email = userEmail || localStorage.getItem('humnai_user_email');
     if (email) {
       dbService.saveChatMessage(email, { role: 'user', text: formattedTranscript });
     }
@@ -261,10 +332,12 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         text: aiResponseText,
         correction: correctionData.corrected && correctionData.corrected !== transcript ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation
+        explanation: correctionData.explanation,
+        timestamp: Date.now()
       };
 
-      setMessages(prev => [...prev, aiMsg]);
+      const finalMessages = [...updatedMessages, aiMsg];
+      persistMessages(finalMessages);
 
       if (email) {
         dbService.saveChatMessage(email, { 
@@ -276,7 +349,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         });
       }
       
-      // Sequence speech correctly: English first, then native explanation
       speak(aiResponseText, 'en-US', () => {
         if (correctionData.corrected && correctionData.corrected.toLowerCase() !== transcript.toLowerCase()) {
           speak(`You can say it like this: ${correctionData.corrected}`, 'en-US', () => {
@@ -290,7 +362,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       });
     } catch (error) {
       console.error("AI Voice processing failed", error);
-      setIsProcessing(false);
     } finally {
       setIsProcessing(false);
     }
@@ -302,17 +373,23 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
     const formattedInput = inputText.trim().charAt(0).toUpperCase() + inputText.trim().slice(1);
     
-    // Trial limit: 10 messages for free users
     if (!isPro && messages.length >= 10) {
       if (onTrialExpired) onTrialExpired();
       return;
     }
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: formattedInput };
-    setMessages(prev => [...prev, userMsg]);
+    const userMsg: Message = { 
+      id: Date.now().toString(), 
+      role: 'user', 
+      text: formattedInput,
+      timestamp: Date.now()
+    };
+    
+    const updatedMessages = [...messages, userMsg];
+    persistMessages(updatedMessages);
     setInputText('');
     
-    const email = localStorage.getItem('humnai_user_email');
+    const email = userEmail || localStorage.getItem('humnai_user_email');
     if (email) {
       dbService.saveChatMessage(email, { role: 'user', text: formattedInput });
     }
@@ -328,10 +405,12 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         text: correctionData.response || "I understand. Can you explain that in more detail?",
         correction: correctionData.corrected && correctionData.corrected !== formattedInput ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation
+        explanation: correctionData.explanation,
+        timestamp: Date.now()
       };
 
-      setMessages(prev => [...prev, aiMsg]);
+      const finalMessages = [...updatedMessages, aiMsg];
+      persistMessages(finalMessages);
 
       if (email) {
         dbService.saveChatMessage(email, { 
@@ -343,7 +422,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         });
       }
       
-      // Sequence speech correctly: English first, then native explanation
       speak(aiMsg.text, 'en-US', () => {
         if (correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase()) {
           speak(`You can say it like this: ${correctionData.corrected}`, 'en-US', () => {
@@ -356,8 +434,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         }
       });
       
-      setIsProcessing(false);
     } catch (error) {
+      console.error("Error generating response:", error);
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -375,10 +454,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             </div>
             <div>
               <h3 className="font-bold text-[#111827] dark:text-white">HumnAi Chat</h3>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online & Ready to talk</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Chats auto-erase after 24 hrs</p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
           </div>
         </div>
 
@@ -500,7 +577,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
           />
           <button 
             type="submit"
-            className="p-2.5 bg-[#4F46E5] text-white rounded-xl hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-100 dark:shadow-none"
+            className="p-2.5 bg-[#4F46E5] text-white rounded-xl hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-100 dark:shadow-none shrink-0"
           >
             <Send size={20} />
           </button>
