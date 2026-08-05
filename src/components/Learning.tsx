@@ -63,20 +63,34 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
   const userLevel = localStorage.getItem('humnai_user_level') || 'Beginner';
   const nativeLanguage = getSelectedLanguageName();
 
-  // ISOLATED MODULE COMPLETION STATE
+  // ISOLATED MODULE COMPLETION LOGIC
   const [completedToday, setCompletedToday] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('humnai_daily_completion');
     const today = new Date().toDateString();
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.date === today) return parsed.modules || {};
+        if (parsed.date === today && typeof parsed.modules === 'object') {
+          return parsed.modules;
+        }
       } catch (e) {
         console.error("Failed to parse completion data", e);
       }
     }
     return {};
   });
+
+  // JAB BHI DUSRA MODULE SELECT HO, TAB INTERNAL LESSON STATES FRESH RESET HO
+  const handleSelectModule = (moduleId: string) => {
+    setSelectedModule(moduleId);
+    setContent(null);
+    setHasReadContent(false);
+    setIsLessonFinished(false);
+    setCurrentQuestionIndex(0);
+    setScore(0);
+    setSelectedAnswer(null);
+    setShowExplanation(false);
+  };
 
   useEffect(() => {
     if (selectedModule) {
@@ -114,18 +128,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       } else {
         throw new Error("Invalid Content Returned");
       }
-
-      setHasReadContent(false);
-      setIsLessonFinished(false);
-      setCurrentQuestionIndex(0);
-      setScore(0);
-      setSelectedAnswer(null);
-      setShowExplanation(false);
     } catch (error) {
       console.error('Failed to fetch daily content, using fallback structure', error);
       
       const fallbackContent = {
-        topic: `Day ${dayNum}: ${selectedModule.toUpperCase()} Practice`,
+        topic: `Day ${dayNum}: ${selectedModule.toUpperCase()} Lesson`,
         explanation: `Today's lesson focuses on core principles of ${selectedModule} tailored for ${userLevel} level.`,
         explanationTranslation: `Aaj ka yah path ${selectedModule} ke mukhya niyamo par aadharit hai.`,
         vocabulary: selectedModule === 'vocabulary' ? [
@@ -165,7 +172,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
-  // INDIVIDUAL MODULE COMPLETION MARKING
+  // SIRF ACTIVE/SELECTED MODULE KO HI COMPLETED MARK KAREIN
   const nextQuestion = () => {
     if (content?.questions && currentQuestionIndex < content.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
@@ -175,13 +182,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       setIsLessonFinished(true);
       const today = new Date().toDateString();
       
-      // ONLY MARK CURRENT SELECTED MODULE AS COMPLETED
-      const newCompletion = { ...completedToday, [selectedModule!]: true };
-      setCompletedToday(newCompletion);
-      localStorage.setItem('humnai_daily_completion', JSON.stringify({
-        date: today,
-        modules: newCompletion
-      }));
+      // SIRF SELECTED MODULE KI ID HO UPDATE KAREIN
+      if (selectedModule) {
+        const newCompletion = { ...completedToday, [selectedModule]: true };
+        setCompletedToday(newCompletion);
+        localStorage.setItem('humnai_daily_completion', JSON.stringify({
+          date: today,
+          modules: newCompletion
+        }));
+      }
     }
   };
 
@@ -234,7 +243,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 return (
                   <button
                     key={d}
-                    onClick={() => setSelectedDay(d)}
+                    onClick={() => {
+                      setSelectedDay(d);
+                      setIsLessonFinished(false);
+                      setHasReadContent(false);
+                    }}
                     className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                       selectedDay === d 
                         ? 'bg-[#4F46E5] text-white shadow-sm' 
@@ -316,7 +329,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              {/* Vocabulary Display (NO EXAM BADGES) */}
+              {/* Vocabulary Display */}
               {content.vocabulary && content.vocabulary.length > 0 && (
                 <div className="space-y-6">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
@@ -541,13 +554,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {MODULES.map((module) => {
           const Icon = ICON_MAP[module.icon] || Book;
-          const isCompleted = !!completedToday[module.id]; // ISOLATED CHECK
+          
+          // STRICT MODULE COMPLETION CHECK
+          const isCompleted = Boolean(completedToday[module.id]);
           const isLocked = !isPro && module.id !== 'vocabulary';
 
           return (
             <div 
               key={module.id} 
-              onClick={() => setSelectedModule(module.id)}
+              onClick={() => handleSelectModule(module.id)}
               className={`group bg-white dark:bg-[#121214] p-6 rounded-3xl border transition-all cursor-pointer relative overflow-hidden ${isCompleted ? 'border-emerald-200 dark:border-emerald-900/30 bg-emerald-50/30 dark:bg-emerald-900/10' : 'border-[#E5E7EB] dark:border-[#1F1F22] hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-50 dark:hover:shadow-none'}`}
             >
               {isLocked && (
