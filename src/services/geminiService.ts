@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-// LocalStorage se User ki Native Language read karne ka function
+// 1. LocalStorage se User ki Native Language read karne ka function
 export function getSelectedLanguageName(): string {
   if (typeof window === 'undefined') return 'Hindi';
   
@@ -16,6 +16,7 @@ export function getSelectedLanguageName(): string {
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
+// 2. Primary aur Backup API Keys ka array
 const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY,
   process.env.VITE_PRIMARY_GEMINI_KEY,
@@ -24,18 +25,26 @@ const GEMINI_KEYS = [
 
 let currentKeyIndex = 0;
 
+// Current Active SDK Instance Helper
 function getAiInstance(): GoogleGenAI {
-  const apiKey = GEMINI_KEYS[currentKeyIndex] || process.env.GEMINI_API_KEY || "";
+  const apiKey = GEMINI_KEYS[currentKeyIndex] || process.env.GEMINI_API_KEY || process.env.VITE_PRIMARY_GEMINI_KEY || "";
   return new GoogleGenAI({ apiKey });
 }
 
+// Key Limit Exceed Hone Par Backup Key Switch Logic
 function rotateToBackupKey(): void {
   if (GEMINI_KEYS.length <= 1) return;
+  const prevIndex = currentKeyIndex;
   currentKeyIndex = (currentKeyIndex + 1) % GEMINI_KEYS.length;
+  console.warn(
+    `⚠️ Primary API Limit Exceeded (Key #${prevIndex + 1}). Switched to Backup Key #${currentKeyIndex + 1}`
+  );
 }
 
+// Automatic Retry & Backup Switch Wrapper
 async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GEMINI_KEYS.length || 3): Promise<T> {
   let lastError: any;
+  
   for (let i = 0; i < maxRetries; i++) {
     try {
       const activeAi = getAiInstance();
@@ -43,9 +52,11 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GE
     } catch (error: any) {
       lastError = error;
       const errorMessage = error?.message || String(error);
+      
       if (errorMessage.includes("429") || errorMessage.includes("Rate exceeded") || errorMessage.includes("Quota")) {
         rotateToBackupKey();
-        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+        const delay = Math.pow(2, i) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
       throw error;
@@ -61,6 +72,7 @@ export function safeJsonParse(text: string | undefined): any {
     const cleanText = jsonMatch ? jsonMatch[0] : text;
     return JSON.parse(cleanText);
   } catch (e) {
+    console.error("Failed to parse Gemini response as JSON:", text);
     return {};
   }
 }
@@ -110,7 +122,6 @@ export const humanAiService = {
     const userLanguage = targetLanguage || getSelectedLanguageName();
     const cacheKey = `humnai_cache_module_${category}_day${dayNumber}_${userLanguage.toLowerCase()}`;
 
-    // Local Storage Cache Check for instant loading
     if (typeof window !== 'undefined') {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
@@ -126,71 +137,7 @@ export const humanAiService = {
     return withRetry(async (ai) => {
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level.
-
-        KNOWLEDGE BASE & CONTENT QUALITY:
-        Use concepts, vocabulary, and grammar structures from standard references like "Black Book of English Vocabulary", "SP Bakshi Objective General English", and "Plinth to Paramount by Neetu Singh".
-
-        REQUIREMENTS:
-        1. Topic: Create a clear, specific topic name for Day ${dayNumber}.
-        2. Content: Provide a detailed explanation in English and a translation in ${userLanguage}.
-        
-        3. Vocabulary Specific (If category is "Vocabulary" or "Synonyms & Antonyms"):
-           - MUST PROVIDE EXACTLY 10 High-Quality Words.
-           - Each item MUST contain:
-             * word: The English Word
-             * meaning: Clear English meaning
-             * translation: Native meaning in ${userLanguage}
-             * example: A natural practice sentence
-
-        4. Verbs Specific (If category is "Verbs"):
-           - MUST PROVIDE EXACTLY 10 Verbs with 4 forms:
-             * v1: Base form
-             * v2: Past form
-             * v3: Past participle
-             * v4: Present participle (-ing)
-             * translation: Meaning in ${userLanguage}
-             * example: Example sentence
-
-        5. Noun, Pronoun, Voice, Narration, Tenses & Grammar Specific:
-           - Provide 3-5 Important Grammar Rules.
-           - For Tenses: Formula/structure string in "tenseStructure".
-           - 5-10 Example sentences with translations in ${userLanguage}.
-
-        6. Practice Questions:
-           - Provide EXACTLY 5 MCQs.
-           - Question Text, Translation in ${userLanguage}, 4 Options, Correct Answer, and Detailed Explanation in ${userLanguage}.
-
-        Return JSON format:
-        {
-          "topic": "Day ${dayNumber}: Topic Title",
-          "explanation": "Detailed explanation in English",
-          "explanationTranslation": "Explanation in ${userLanguage}",
-          "rules": ["Rule 1", "Rule 2"],
-          "vocabulary": [
-            { "word": "Word", "meaning": "Meaning", "translation": "Native Translation", "example": "Sentence" }
-          ],
-          "synonymsAntonyms": [
-            { "word": "Word", "type": "synonym/antonym", "target": "Target", "meaning": "Meaning", "translation": "Native", "example": "Sentence" }
-          ],
-          "nouns": [ { "word": "Noun", "translation": "Native", "example": "Sentence" } ],
-          "pronouns": [ { "word": "Pronoun", "translation": "Native", "example": "Sentence" } ],
-          "verbs": [ { "v1": "v1", "v2": "v2", "v3": "v3", "v4": "v4", "translation": "Native", "example": "Sentence" } ],
-          "voiceNarrationExamples": [ { "original": "Active/Direct", "transformed": "Passive/Indirect", "translation": "Native" } ],
-          "posItems": [ { "word": "Word", "translation": "Native", "example": "Sentence" } ],
-          "tenseStructure": "Structure Formula (if category is Tenses)",
-          "examples": [ { "english": "English sentence", "translation": "Translation in ${userLanguage}" } ],
-          "questions": [
-            {
-              "id": 1,
-              "question": "Question text",
-              "translation": "Translation in ${userLanguage}",
-              "options": ["Option A", "Option B", "Option C", "Option D"],
-              "answer": "Correct Option",
-              "explanation": "Detailed explanation in ${userLanguage}"
-            }
-          ]
-        }`,
+        contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level. Return JSON format.`,
         config: { responseMimeType: "application/json" }
       });
 
@@ -206,16 +153,58 @@ export const humanAiService = {
     });
   },
 
+  // FIX FOR AI CHAT NOT RESPONDING
   async correctSentence(sentence: string, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
-    return withRetry(async (ai) => {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Correct or translate this sentence: "${sentence}" into conversational English with explanations in ${userLanguage}.`,
-        config: { responseMimeType: "application/json" }
+    try {
+      return await withRetry(async (ai) => {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `You are an AI English Tutor for a student learning English.
+          The user said: "${sentence}".
+          
+          Tasks:
+          1. If input is in ${userLanguage} or non-English, translate it to conversational English.
+          2. If input is in English with grammatical errors, correct it.
+          3. Provide a friendly conversational reply in English.
+          4. Provide meaning of user's intent in ${userLanguage}.
+          5. Provide explanation in ${userLanguage} about grammar or structure used.
+          
+          Return JSON format strictly:
+          {
+            "corrected": "Corrected/Natural English sentence",
+            "response": "Your friendly English response",
+            "translation": "User intent translated in ${userLanguage}",
+            "explanation": "Clear explanation in ${userLanguage}"
+          }`,
+          config: { responseMimeType: "application/json" }
+        });
+
+        const parsed = safeJsonParse(response.text);
+
+        // Fallback Response if JSON Parsing produces empty response
+        if (!parsed || (!parsed.response && !parsed.corrected)) {
+          return {
+            corrected: sentence,
+            response: response.text || "That sounds interesting! Tell me more.",
+            translation: sentence,
+            explanation: `Keep practicing in ${userLanguage}!`
+          };
+        }
+
+        return parsed;
       });
-      return safeJsonParse(response.text);
-    });
+    } catch (error) {
+      console.error("Gemini Chat API Error:", error);
+      
+      // Automatic Fallback Response on API Failure (Rate Limit / Network Error)
+      return {
+        corrected: sentence,
+        response: "I understood you! Let's continue practicing English together.",
+        translation: sentence,
+        explanation: `API Limit reached. Please try again in a few moments.`
+      };
+    }
   }
 };
