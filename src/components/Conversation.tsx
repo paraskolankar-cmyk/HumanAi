@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Send, 
   Mic, 
+  MicOff, 
   X,
   Maximize2,
   MessageCircle,
@@ -45,7 +46,7 @@ interface ConversationProps {
 const DEFAULT_WELCOME_MESSAGE: Message = { 
   id: '1', 
   role: 'ai', 
-  text: "Hello! I'm HumnAi, your English companion. What would you like to chat about today?",
+  text: "Hey there! I'm HumnAi. How's your day going so far?",
   timestamp: Date.now()
 };
 
@@ -318,10 +319,10 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      // Pass history context array so AI remembers previous messages
+      // Pass full conversation history array so AI remembers context and talks humanly
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || `That sounds really interesting! Tell me more about "${transcript}".`;
+      const aiResponseText = correctionData.response || `That's fascinating! What else is on your mind regarding "${transcript}"?`;
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -394,14 +395,14 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      // Pass history context array for human-like conversational replies
+      // Pass full conversation history array so AI remembers context and talks humanly
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        text: correctionData.response || `That's great! What else would you like to explore about "${formattedInput}"?`,
+        text: correctionData.response || `That's awesome! What else would you like to discuss about "${formattedInput}"?`,
         correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase() ? correctionData.corrected : undefined,
         translation: correctionData.translation,
         explanation: correctionData.explanation,
