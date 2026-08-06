@@ -18,7 +18,8 @@ import {
   Award,
   Trophy,
   Zap,
-  RotateCcw
+  RotateCcw,
+  Briefcase
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService } from '@/src/services/geminiService';
@@ -34,53 +35,84 @@ interface PracticeProps {
   onTabChange?: (tabId: string) => void;
 }
 
+// 5 FIXED ASSESSMENT QUESTIONS FOR ACCURATE LEVEL TESTING
+const ASSESSMENT_QUESTIONS = [
+  {
+    question: "1. Choose the correct sentence for daily habit:",
+    options: ["He go to college every morning.", "He goes to college every morning.", "He going to college every morning."],
+    answer: "He goes to college every morning."
+  },
+  {
+    question: "2. Yesterday, I ____ an important meeting with my team.",
+    options: ["attend", "attended", "attending"],
+    answer: "attended"
+  },
+  {
+    question: "3. Choose the grammatically correct sentence:",
+    options: [
+      "If I will study hard, I will pass.",
+      "If I study hard, I will pass.",
+      "If I hard study, I pass."
+    ],
+    answer: "If I study hard, I will pass."
+  },
+  {
+    question: "4. Identify the sentence with correct preposition usage:",
+    options: [
+      "She has been working here since three years.",
+      "She has been working here for three years.",
+      "She is working here from three years."
+    ],
+    answer: "She has been working here for three years."
+  },
+  {
+    question: "5. What is the passive form of: 'The manager approved the proposal'?",
+    options: [
+      "The proposal was approved by the manager.",
+      "The proposal is approved by the manager.",
+      "The proposal approved the manager."
+    ],
+    answer: "The proposal was approved by the manager."
+  }
+];
+
+const POPULAR_PROFESSIONS = [
+  "Student / College Aspirant",
+  "Software Developer / IT Professional",
+  "Business Owner / Entrepreneur",
+  "Sales / Marketing Executive",
+  "Government Exam Aspirant (SSC/Banking/UPSC)",
+  "Teacher / Educator",
+  "Healthcare / Medical Worker",
+  "Job Seeker / Looking for Job"
+];
+
 const DEFAULT_ROADMAP = [
-  { month: 1, theme: "Foundations & Basic Vocabulary", objectives: ["Basic sentence structure", "Daily new words", "Self-introduction"] },
-  { month: 2, theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense", "Regular & Irregular Verbs"] },
-  { month: 3, theme: "Future Tense & Modals", objectives: ["Simple Future Tense", "Helping Verbs (Can, Must)", "Daily Conversations"] },
-  { month: 4, theme: "Nouns, Pronouns & Adjectives", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives"] },
-  { month: 5, theme: "Verbs & Form Structures", objectives: ["V1 to V4 Verb Forms", "Subject-Verb Agreement", "Sentence Patterns"] },
-  { month: 6, theme: "Prepositions & Conjunctions", objectives: ["Prepositions of Time & Place", "Linking Words", "Compound Sentences"] },
-  { month: 7, theme: "Voice Transformation", objectives: ["Active Voice Rules", "Passive Voice Rules", "Sentence Conversions"] },
-  { month: 8, theme: "Direct & Indirect Speech", objectives: ["Direct Narration Rules", "Indirect Speech Rules", "Reporting Verbs"] },
-  { month: 9, theme: "Advanced Vocabulary & Idioms", objectives: ["Common Idioms & Phrases", "Synonyms & Antonyms", "Contextual Usage"] },
-  { month: 10, theme: "Reading & Error Spotting", objectives: ["Comprehension Practice", "Grammatical Error Spotting", "Sentence Rearrangement"] },
-  { month: 11, theme: "Conversational Fluency", objectives: ["Fluency in Daily Topics", "Public Speaking Basics", "Professional Communication"] },
-  { month: 12, theme: "Mastery & Review", objectives: ["Advanced Inversion Rules", "Full Course Mock Tests", "Fluency Certification"] }
+  { month: 1, theme: "Foundations & Professional Vocabulary", objectives: ["Basic sentence structure", "Workplace daily words", "Self-introduction & Elevator pitch"] },
+  { month: 2, theme: "Present & Past Communication", objectives: ["Simple Present Tense in meetings", "Past tense for achievements", "Regular & Irregular Verbs"] },
+  { month: 3, theme: "Future Tense & Modals in Workplace", objectives: ["Future planning & projections", "Polite requests (Could, Would, Should)", "Scheduling meetings"] },
+  { month: 4, theme: "Nouns, Pronouns & Professional Writing", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives for reports"] },
+  { month: 5, theme: "Verb Patterns & Sentence Building", objectives: ["Verb Forms V1-V4", "Subject-Verb Agreement", "Avoiding common speech errors"] },
+  { month: 6, theme: "Prepositions & Email Writing", objectives: ["Prepositions of Time & Place", "Formal Email Etiquette", "Compound Sentences"] },
+  { month: 7, theme: "Active & Passive Voice in Business", objectives: ["Active Voice Rules", "Passive Voice in Documentation", "Converting Sentences"] },
+  { month: 8, theme: "Reporting Speech & Feedback", objectives: ["Direct Speech Rules", "Indirect Speech Conversion", "Handling Feedback Politely"] },
+  { month: 9, theme: "Business Idioms & Phrases", objectives: ["High-frequency Corporate Idioms", "Phrasal Verbs for workplace", "Contextual Vocabulary"] },
+  { month: 10, theme: "Reading Comprehension & Error Spotting", objectives: ["Comprehension Practice", "Grammatical Error Spotting", "Rearranging Jumbled Ideas"] },
+  { month: 11, theme: "Interview & Presentation Fluency", objectives: ["Answering Interview Q&A", "Delivering Presentations", "Public Speaking Confidence"] },
+  { month: 12, theme: "Career Mastery & Final Certification", objectives: ["Advanced Grammar Rules", "Full Mock Drills", "Complete Fluency Review"] }
 ];
 
 export default function Practice({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired, onTabChange }: PracticeProps) {
-  const [assessmentQuestions, setAssessmentQuestions] = useState<any[]>([]);
   const [view, setView] = useState<'assessment' | 'roadmap' | 'practice'>(() => {
     const completed = localStorage.getItem('humnai_assessment_completed');
     return completed === 'true' ? 'roadmap' : 'assessment';
   });
 
-  useEffect(() => {
-    const fetchQuestions = async (retries = 3) => {
-      try {
-        const response = await fetch('/api/assessment-questions');
-        const text = await response.text();
-        
-        if (text.includes("Rate exceeded")) {
-          if (retries > 0) {
-            setTimeout(() => fetchQuestions(retries - 1), 2000);
-            return;
-          }
-          throw new Error("Rate limit exceeded");
-        }
-
-        const data = JSON.parse(text);
-        setAssessmentQuestions(data);
-      } catch (error) {
-        console.error('Failed to fetch assessment questions', error);
-        setAssessmentQuestions([
-          { question: "Which is correct?", options: ["He go", "He goes"], answer: "He goes" }
-        ]);
-      }
-    };
-    fetchQuestions();
-  }, []);
+  const [assessmentStep, setAssessmentStep] = useState<'profession' | 'quiz'>('profession');
+  const [userProfession, setUserProfession] = useState<string>(() => {
+    return localStorage.getItem('humnai_user_profession') || '';
+  });
+  const [customProfession, setCustomProfession] = useState('');
 
   const [isAssessing, setIsAssessing] = useState(false);
   const [quizIndex, setQuizIndex] = useState(0);
@@ -88,6 +120,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [userLevel, setUserLevel] = useState<string | null>(() => {
     return localStorage.getItem('humnai_user_level') || 'Beginner';
   });
+
   const [roadmap, setRoadmap] = useState<any[]>(() => {
     const saved = localStorage.getItem('humnai_roadmap');
     if (saved) {
@@ -98,24 +131,24 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
     return DEFAULT_ROADMAP;
   });
+
   const [completedDays, setCompletedDays] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('humnai_completed_days');
     return saved ? JSON.parse(saved) : { "1-1": true };
   });
-  
+
   const [selectedMonth, setSelectedMonth] = useState(1);
   const [selectedDay, setSelectedDay] = useState(1);
   const [targetLanguage, setTargetLanguage] = useState(() => {
     return localStorage.getItem('humnai_user_language') || 'Hindi';
   });
+
   const [dailyTasks, setDailyTasks] = useState<any>(null);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
 
-  // Daily Task Completion Modal State
   const [showCompletionModal, setShowCompletionModal] = useState(false);
-  
   const [taskType, setTaskType] = useState<'sentences' | 'translations' | 'arrangements' | 'mcqs'>('sentences');
   const [taskIndex, setTaskIndex] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -125,27 +158,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [userArrangement, setUserArrangement] = useState<string[]>([]);
   const recognitionRef = React.useRef<any>(null);
   const lastTranscriptRef = React.useRef<string>('');
-
-  // AUTO-FETCH ROADMAP IF EMPTY WHEN IN ROADMAP VIEW
-  useEffect(() => {
-    if (view === 'roadmap' && (!roadmap || roadmap.length === 0)) {
-      const loadPlan = async () => {
-        setIsAssessing(true);
-        try {
-          const plan = await humanAiService.generateLearningPlan(userLevel || 'Beginner');
-          const finalPlan = (plan && plan.roadmap && plan.roadmap.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
-          setRoadmap(finalPlan);
-          localStorage.setItem('humnai_roadmap', JSON.stringify(finalPlan));
-        } catch (e) {
-          setRoadmap(DEFAULT_ROADMAP);
-          localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
-        } finally {
-          setIsAssessing(false);
-        }
-      };
-      loadPlan();
-    }
-  }, [view]);
 
   const currentSubTask = dailyTasks ? (
     taskType === 'sentences' 
@@ -244,21 +256,29 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
+  const handleSelectProfession = (prof: string) => {
+    const finalProf = prof === 'other' ? customProfession.trim() || 'General Professional' : prof;
+    setUserProfession(finalProf);
+    localStorage.setItem('humnai_user_profession', finalProf);
+    setAssessmentStep('quiz');
+  };
+
   const handleQuizAnswer = async (answer: string) => {
     const newAnswers = [...quizAnswers, answer];
     setQuizAnswers(newAnswers);
 
-    if (quizIndex < assessmentQuestions.length - 1) {
+    if (quizIndex < ASSESSMENT_QUESTIONS.length - 1) {
       setQuizIndex(quizIndex + 1);
     } else {
       setIsAssessing(true);
       try {
-        const assessment = await humanAiService.assessLevel(newAnswers.join(", "));
+        const prof = userProfession || 'General Professional';
+        const assessment = await humanAiService.assessLevel(newAnswers, prof);
         const calculatedLevel = assessment.level || "Intermediate";
         setUserLevel(calculatedLevel);
         localStorage.setItem('humnai_user_level', calculatedLevel);
         
-        const plan = await humanAiService.generateLearningPlan(calculatedLevel);
+        const plan = await humanAiService.generateLearningPlan(calculatedLevel, prof);
         const finalPlan = (plan && plan.roadmap && plan.roadmap.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
         
         setRoadmap(finalPlan);
@@ -266,7 +286,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
       } catch (error) {
-        console.error("Assessment failed, setting default roadmap", error);
+        console.error("Assessment evaluation error", error);
         setUserLevel("Intermediate");
         setRoadmap(DEFAULT_ROADMAP);
         localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
@@ -278,7 +298,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
-  // SAFE DAILY PRACTICE LOADER
   const startDailyPractice = async (month: number, day: number) => {
     const dayKey = `${month}-${day}`;
     if (!completedDays[dayKey]) {
@@ -457,47 +476,81 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
            (dailyTasks.mcqs?.length || 0);
   };
 
+  // 1. ASSESSMENT VIEW (PROFESSION + 5 QUESTIONS)
   if (view === 'assessment') {
-    if (assessmentQuestions.length === 0) {
-      return (
-        <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
-          <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
-          <p className="font-bold text-[#111827] dark:text-white">Preparing Assessment...</p>
-        </div>
-      );
-    }
-
     return (
-      <div className="max-w-2xl mx-auto space-y-8">
+      <div className="max-w-2xl mx-auto space-y-8 py-6">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto">
-            <ClipboardList size={32} />
+            {assessmentStep === 'profession' ? <Briefcase size={32} /> : <ClipboardList size={32} />}
           </div>
-          <h2 className="text-3xl font-bold text-[#111827] dark:text-white">Quick Assessment</h2>
-          <p className="text-[#6B7280] dark:text-gray-400">Let's check your English level to create your 12-month customized plan.</p>
+          <h2 className="text-3xl font-bold text-[#111827] dark:text-white">
+            {assessmentStep === 'profession' ? 'What is your Profession or Goal?' : '5-Question Quick English Test'}
+          </h2>
+          <p className="text-[#6B7280] dark:text-gray-400">
+            {assessmentStep === 'profession' 
+              ? "We'll build a 12-month English roadmap customized for your career & daily needs."
+              : "Answer these 5 questions so AI can calculate your level accurately."}
+          </p>
         </div>
 
         <div className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 shadow-sm overflow-hidden p-8">
-          {isAssessing ? (
+          {assessmentStep === 'profession' ? (
+            <div className="space-y-6">
+              <h3 className="text-lg font-bold text-[#111827] dark:text-white">Select your primary role:</h3>
+              <div className="grid grid-cols-1 gap-3">
+                {POPULAR_PROFESSIONS.map((prof, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSelectProfession(prof)}
+                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-semibold text-[#111827] dark:text-white flex items-center justify-between cursor-pointer"
+                  >
+                    <span>{prof}</span>
+                    <ChevronLeft size={18} className="rotate-180 text-gray-400" />
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 space-y-3">
+                <p className="text-xs font-bold text-gray-400 uppercase">Or Enter Custom Role:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={customProfession}
+                    onChange={(e) => setCustomProfession(e.target.value)}
+                    placeholder="e.g. Graphic Designer, Chef, Flight Attendant..."
+                    className="flex-1 p-3.5 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={() => handleSelectProfession('other')}
+                    disabled={!customProfession.trim()}
+                    className="px-6 py-3.5 bg-[#4F46E5] text-white rounded-xl font-bold hover:bg-indigo-600 disabled:opacity-50 transition-all cursor-pointer"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : isAssessing ? (
             <div className="py-12 flex flex-col items-center justify-center space-y-4">
               <Loader2 size={48} className="text-[#4F46E5] dark:text-indigo-400 animate-spin" />
-              <p className="text-lg font-semibold text-[#111827] dark:text-white">AI is analyzing your level & generating roadmap...</p>
+              <p className="text-lg font-semibold text-[#111827] dark:text-white">AI is evaluating your level & generating {userProfession} Roadmap...</p>
             </div>
           ) : (
             <div className="space-y-8">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400 uppercase tracking-wider">Question {quizIndex + 1} of {assessmentQuestions.length}</span>
-                <div className="flex gap-1">
-                  {assessmentQuestions.map((_, i) => (
-                    <div key={i} className={`h-1.5 w-8 rounded-full ${i <= quizIndex ? 'bg-[#4F46E5] dark:bg-indigo-400' : 'bg-[#F3F4F6] dark:bg-gray-800'}`}></div>
+                <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400 uppercase tracking-wider">Question {quizIndex + 1} of {ASSESSMENT_QUESTIONS.length}</span>
+                <div className="flex gap-1.5">
+                  {ASSESSMENT_QUESTIONS.map((_, i) => (
+                    <div key={i} className={`h-2 w-8 rounded-full ${i <= quizIndex ? 'bg-[#4F46E5] dark:bg-indigo-400' : 'bg-[#F3F4F6] dark:bg-gray-800'}`}></div>
                   ))}
                 </div>
               </div>
 
-              <h3 className="text-xl font-bold text-[#111827] dark:text-white">{assessmentQuestions[quizIndex].question}</h3>
+              <h3 className="text-xl font-bold text-[#111827] dark:text-white">{ASSESSMENT_QUESTIONS[quizIndex].question}</h3>
 
               <div className="grid grid-cols-1 gap-4">
-                {assessmentQuestions[quizIndex].options.map((option: string, i: number) => (
+                {ASSESSMENT_QUESTIONS[quizIndex].options.map((option: string, i: number) => (
                   <button
                     key={i}
                     onClick={() => handleQuizAnswer(option)}
@@ -514,15 +567,29 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
+  // 2. ROADMAP VIEW
   if (view === 'roadmap') {
     return (
       <div className="space-y-8">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-[#111827] dark:text-white">Your 12-Month Roadmap</h2>
-            <p className="text-[#6B7280] dark:text-gray-400">Personalized plan for {userLevel} level.</p>
+            <h2 className="text-2xl font-bold text-[#111827] dark:text-white">Your 12-Month Practice Roadmap</h2>
+            <p className="text-[#6B7280] dark:text-gray-400">
+              Customized for <span className="font-bold text-indigo-600 dark:text-indigo-400">{userProfession || 'Profession'}</span> • Level: <span className="font-bold text-indigo-600 dark:text-indigo-400">{userLevel}</span>
+            </p>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => {
+                setAssessmentStep('profession');
+                setQuizIndex(0);
+                setQuizAnswers([]);
+                setView('assessment');
+              }}
+              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <RefreshCw size={14} /> Retake Test & Goal
+            </button>
             <div className="flex items-center gap-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 px-3 py-2 rounded-xl">
               <Languages size={18} className="text-[#6B7280] dark:text-gray-500" />
               <select 
@@ -540,69 +607,58 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 <option value="Bengali">Bengali</option>
               </select>
             </div>
-            <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-4 py-2 rounded-xl text-[#4F46E5] dark:text-indigo-400 font-semibold">
-              <BrainCircuit size={20} />
-              <span>{userLevel}</span>
-            </div>
           </div>
         </div>
 
-        {isAssessing ? (
-          <div className="h-[40vh] flex flex-col items-center justify-center gap-4">
-            <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
-            <p className="font-bold text-[#111827] dark:text-white">Loading your 12-Month Roadmap...</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {roadmap.map((monthData, i) => (
-              <div key={i} className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-xl flex items-center justify-center font-bold">
-                    M{monthData.month || (i + 1)}
-                  </div>
-                </div>
-                <h3 className="text-lg font-bold text-[#111827] dark:text-white mb-2">{monthData.theme}</h3>
-                <ul className="space-y-2 mb-6">
-                  {monthData.objectives?.map((obj: string, j: number) => (
-                    <li key={j} className="flex items-start gap-2 text-sm text-[#6B7280] dark:text-gray-400">
-                      <Check size={14} className="mt-1 text-emerald-500 shrink-0" />
-                      <span>{obj}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="grid grid-cols-7 gap-1">
-                  {Array.from({ length: 28 }).map((_, day) => {
-                    const dayNum = day + 1;
-                    const mNum = monthData.month || (i + 1);
-                    const dayKey = `${mNum}-${dayNum}`;
-                    const isUnlocked = isPro ? completedDays[dayKey] : (mNum === 1 && dayNum === 1);
-                    
-                    return (
-                      <button
-                        key={day}
-                        onClick={() => startDailyPractice(mNum, dayNum)}
-                        className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative group cursor-pointer ${
-                          dayNum === selectedDay && mNum === selectedMonth
-                            ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200 dark:ring-indigo-900'
-                            : isUnlocked
-                            ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-100'
-                            : 'bg-gray-100 dark:bg-gray-800 text-gray-300'
-                        }`}
-                      >
-                        {dayNum}
-                        {!isUnlocked && !isPro && (mNum > 1 || dayNum > 1) && (
-                          <div className="absolute -top-1 -right-1">
-                            <Sparkles size={10} className="text-amber-500 fill-amber-500" />
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {roadmap.map((monthData, i) => (
+            <div key={i} className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-xl flex items-center justify-center font-bold">
+                  M{monthData.month || (i + 1)}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+              <h3 className="text-lg font-bold text-[#111827] dark:text-white mb-2">{monthData.theme}</h3>
+              <ul className="space-y-2 mb-6">
+                {monthData.objectives?.map((obj: string, j: number) => (
+                  <li key={j} className="flex items-start gap-2 text-sm text-[#6B7280] dark:text-gray-400">
+                    <Check size={14} className="mt-1 text-emerald-500 shrink-0" />
+                    <span>{obj}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="grid grid-cols-7 gap-1">
+                {Array.from({ length: 28 }).map((_, day) => {
+                  const dayNum = day + 1;
+                  const mNum = monthData.month || (i + 1);
+                  const dayKey = `${mNum}-${dayNum}`;
+                  const isUnlocked = isPro ? completedDays[dayKey] : (mNum === 1 && dayNum === 1);
+                  
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => startDailyPractice(mNum, dayNum)}
+                      className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative group cursor-pointer ${
+                        dayNum === selectedDay && mNum === selectedMonth
+                          ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200 dark:ring-indigo-900'
+                          : isUnlocked
+                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-100'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-300'
+                      }`}
+                    >
+                      {dayNum}
+                      {!isUnlocked && !isPro && (mNum > 1 || dayNum > 1) && (
+                        <div className="absolute -top-1 -right-1">
+                          <Sparkles size={10} className="text-amber-500 fill-amber-500" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
 
         <AnimatePresence>
           {showLockModal && (
@@ -623,6 +679,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
+  // 3. PRACTICE TASKS VIEW
   if (view === 'practice' && dailyTasks && currentSubTask) {
     return (
       <div className="max-w-4xl mx-auto space-y-8 relative">
