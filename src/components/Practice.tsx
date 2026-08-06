@@ -34,6 +34,21 @@ interface PracticeProps {
   onTabChange?: (tabId: string) => void;
 }
 
+const DEFAULT_ROADMAP = [
+  { month: 1, theme: "Foundations & Basic Vocabulary", objectives: ["Basic sentence structure", "Daily new words", "Self-introduction"] },
+  { month: 2, theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense", "Regular & Irregular Verbs"] },
+  { month: 3, theme: "Future Tense & Modals", objectives: ["Simple Future Tense", "Helping Verbs (Can, Must)", "Daily Conversations"] },
+  { month: 4, theme: "Nouns, Pronouns & Adjectives", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives"] },
+  { month: 5, theme: "Verbs & Form Structures", objectives: ["V1 to V4 Verb Forms", "Subject-Verb Agreement", "Sentence Patterns"] },
+  { month: 6, theme: "Prepositions & Conjunctions", objectives: ["Prepositions of Time & Place", "Linking Words", "Compound Sentences"] },
+  { month: 7, theme: "Voice Transformation", objectives: ["Active Voice Rules", "Passive Voice Rules", "Sentence Conversions"] },
+  { month: 8, theme: "Direct & Indirect Speech", objectives: ["Direct Narration Rules", "Indirect Speech Rules", "Reporting Verbs"] },
+  { month: 9, theme: "Advanced Vocabulary & Idioms", objectives: ["Common Idioms & Phrases", "Synonyms & Antonyms", "Contextual Usage"] },
+  { month: 10, theme: "Reading & Error Spotting", objectives: ["Comprehension Practice", "Grammatical Error Spotting", "Sentence Rearrangement"] },
+  { month: 11, theme: "Conversational Fluency", objectives: ["Fluency in Daily Topics", "Public Speaking Basics", "Professional Communication"] },
+  { month: 12, theme: "Mastery & Review", objectives: ["Advanced Inversion Rules", "Full Course Mock Tests", "Fluency Certification"] }
+];
+
 export default function Practice({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired, onTabChange }: PracticeProps) {
   const [assessmentQuestions, setAssessmentQuestions] = useState<any[]>([]);
   const [view, setView] = useState<'assessment' | 'roadmap' | 'practice'>(() => {
@@ -71,11 +86,17 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState<string[]>([]);
   const [userLevel, setUserLevel] = useState<string | null>(() => {
-    return localStorage.getItem('humnai_user_level');
+    return localStorage.getItem('humnai_user_level') || 'Beginner';
   });
   const [roadmap, setRoadmap] = useState<any[]>(() => {
     const saved = localStorage.getItem('humnai_roadmap');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return DEFAULT_ROADMAP;
   });
   const [completedDays, setCompletedDays] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('humnai_completed_days');
@@ -104,6 +125,27 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [userArrangement, setUserArrangement] = useState<string[]>([]);
   const recognitionRef = React.useRef<any>(null);
   const lastTranscriptRef = React.useRef<string>('');
+
+  // AUTO-FETCH ROADMAP IF EMPTY WHEN IN ROADMAP VIEW
+  useEffect(() => {
+    if (view === 'roadmap' && (!roadmap || roadmap.length === 0)) {
+      const loadPlan = async () => {
+        setIsAssessing(true);
+        try {
+          const plan = await humanAiService.generateLearningPlan(userLevel || 'Beginner');
+          const finalPlan = (plan && plan.roadmap && plan.roadmap.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
+          setRoadmap(finalPlan);
+          localStorage.setItem('humnai_roadmap', JSON.stringify(finalPlan));
+        } catch (e) {
+          setRoadmap(DEFAULT_ROADMAP);
+          localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
+        } finally {
+          setIsAssessing(false);
+        }
+      };
+      loadPlan();
+    }
+  }, [view]);
 
   const currentSubTask = dailyTasks ? (
     taskType === 'sentences' 
@@ -212,18 +254,23 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       setIsAssessing(true);
       try {
         const assessment = await humanAiService.assessLevel(newAnswers.join(", "));
-        setUserLevel(assessment.level);
-        localStorage.setItem('humnai_user_level', assessment.level);
+        const calculatedLevel = assessment.level || "Intermediate";
+        setUserLevel(calculatedLevel);
+        localStorage.setItem('humnai_user_level', calculatedLevel);
         
-        const plan = await humanAiService.generateLearningPlan(assessment.level);
-        setRoadmap(plan.roadmap || []);
-        localStorage.setItem('humnai_roadmap', JSON.stringify(plan.roadmap || []));
+        const plan = await humanAiService.generateLearningPlan(calculatedLevel);
+        const finalPlan = (plan && plan.roadmap && plan.roadmap.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
         
+        setRoadmap(finalPlan);
+        localStorage.setItem('humnai_roadmap', JSON.stringify(finalPlan));
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
       } catch (error) {
-        console.error("Assessment failed", error);
+        console.error("Assessment failed, setting default roadmap", error);
         setUserLevel("Intermediate");
+        setRoadmap(DEFAULT_ROADMAP);
+        localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
+        localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
       } finally {
         setIsAssessing(false);
@@ -309,7 +356,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setShowTranslation(true);
   };
 
-  // UPDATED NEXT SUBTASK WITH REAL-TIME DATABASE SYNC & COMPLETION POPUP
   const nextSubTask = async () => {
     setFeedback({ status: null, text: '' });
     setShowTranslation(false);
@@ -331,7 +377,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       setCompletedDays(newCompleted);
       localStorage.setItem('humnai_completed_days', JSON.stringify(newCompleted));
 
-      // Track completed lesson for progress graph
       const completedLessons = JSON.parse(localStorage.getItem('humnai_completed_lessons') || '{}');
       completedLessons[`lesson_${selectedMonth}_${selectedDay}`] = true;
       localStorage.setItem('humnai_completed_lessons', JSON.stringify(completedLessons));
@@ -341,7 +386,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         const lessonCount = Object.keys(completedLessons).length;
         const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
 
-        // POST sync request to update DB Graph & Streak
         try {
           await fetch('/api/sync', {
             method: 'POST',
@@ -364,7 +408,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         });
       }
       
-      // TRIGGER DAILY TASK COMPLETION POPUP
       setShowCompletionModal(true);
     } else {
       if (taskType === 'sentences') {
@@ -438,7 +481,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           {isAssessing ? (
             <div className="py-12 flex flex-col items-center justify-center space-y-4">
               <Loader2 size={48} className="text-[#4F46E5] dark:text-indigo-400 animate-spin" />
-              <p className="text-lg font-semibold text-[#111827] dark:text-white">AI is analyzing your level...</p>
+              <p className="text-lg font-semibold text-[#111827] dark:text-white">AI is analyzing your level & generating roadmap...</p>
             </div>
           ) : (
             <div className="space-y-8">
@@ -458,7 +501,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                   <button
                     key={i}
                     onClick={() => handleQuizAnswer(option)}
-                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-medium text-[#111827] dark:text-white"
+                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-medium text-[#111827] dark:text-white cursor-pointer"
                   >
                     {option}
                   </button>
@@ -504,54 +547,62 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {roadmap.map((monthData, i) => (
-            <div key={i} className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-xl flex items-center justify-center font-bold">
-                  M{monthData.month}
+        {isAssessing ? (
+          <div className="h-[40vh] flex flex-col items-center justify-center gap-4">
+            <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
+            <p className="font-bold text-[#111827] dark:text-white">Loading your 12-Month Roadmap...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {roadmap.map((monthData, i) => (
+              <div key={i} className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-xl flex items-center justify-center font-bold">
+                    M{monthData.month || (i + 1)}
+                  </div>
+                </div>
+                <h3 className="text-lg font-bold text-[#111827] dark:text-white mb-2">{monthData.theme}</h3>
+                <ul className="space-y-2 mb-6">
+                  {monthData.objectives?.map((obj: string, j: number) => (
+                    <li key={j} className="flex items-start gap-2 text-sm text-[#6B7280] dark:text-gray-400">
+                      <Check size={14} className="mt-1 text-emerald-500 shrink-0" />
+                      <span>{obj}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 28 }).map((_, day) => {
+                    const dayNum = day + 1;
+                    const mNum = monthData.month || (i + 1);
+                    const dayKey = `${mNum}-${dayNum}`;
+                    const isUnlocked = isPro ? completedDays[dayKey] : (mNum === 1 && dayNum === 1);
+                    
+                    return (
+                      <button
+                        key={day}
+                        onClick={() => startDailyPractice(mNum, dayNum)}
+                        className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative group cursor-pointer ${
+                          dayNum === selectedDay && mNum === selectedMonth
+                            ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200 dark:ring-indigo-900'
+                            : isUnlocked
+                            ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-100'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-300'
+                        }`}
+                      >
+                        {dayNum}
+                        {!isUnlocked && !isPro && (mNum > 1 || dayNum > 1) && (
+                          <div className="absolute -top-1 -right-1">
+                            <Sparkles size={10} className="text-amber-500 fill-amber-500" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-              <h3 className="text-lg font-bold text-[#111827] dark:text-white mb-2">{monthData.theme}</h3>
-              <ul className="space-y-2 mb-6">
-                {monthData.objectives.map((obj: string, j: number) => (
-                  <li key={j} className="flex items-start gap-2 text-sm text-[#6B7280] dark:text-gray-400">
-                    <Check size={14} className="mt-1 text-emerald-500 shrink-0" />
-                    <span>{obj}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="grid grid-cols-7 gap-1">
-                {Array.from({ length: 28 }).map((_, day) => {
-                  const dayNum = day + 1;
-                  const dayKey = `${monthData.month}-${dayNum}`;
-                  const isUnlocked = isPro ? completedDays[dayKey] : (monthData.month === 1 && dayNum === 1);
-                  
-                  return (
-                    <button
-                      key={day}
-                      onClick={() => startDailyPractice(monthData.month, dayNum)}
-                      className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative group ${
-                        dayNum === selectedDay && monthData.month === selectedMonth
-                          ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200 dark:ring-indigo-900'
-                          : isUnlocked
-                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-100'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-300'
-                      }`}
-                    >
-                      {dayNum}
-                      {!isUnlocked && !isPro && (monthData.month > 1 || dayNum > 1) && (
-                        <div className="absolute -top-1 -right-1">
-                          <Sparkles size={10} className="text-amber-500 fill-amber-500" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <AnimatePresence>
           {showLockModal && (
@@ -563,7 +614,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
                 <h3 className="text-2xl font-black text-[#111827] dark:text-white">Day Locked!</h3>
                 <p className="text-[#6B7280] dark:text-gray-400 font-medium">{lockMessage}</p>
-                <button onClick={() => setShowLockModal(false)} className="w-full py-4 bg-[#4F46E5] text-white rounded-2xl font-bold">Got it!</button>
+                <button onClick={() => setShowLockModal(false)} className="w-full py-4 bg-[#4F46E5] text-white rounded-2xl font-bold cursor-pointer">Got it!</button>
               </motion.div>
             </div>
           )}
@@ -576,7 +627,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     return (
       <div className="max-w-4xl mx-auto space-y-8 relative">
         <div className="flex items-center justify-between">
-          <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors">
+          <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors cursor-pointer">
             <ChevronLeft size={20} />
             Back to Roadmap
           </button>
@@ -621,11 +672,11 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     <Volume2 size={32} />
                   </div>
                   <h3 className="text-3xl font-bold text-[#111827] dark:text-white leading-tight">"{currentSubTask?.english || '...'}"</h3>
-                  <button onClick={() => setShowTranslation(!showTranslation)} className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 hover:underline flex items-center gap-1">
+                  <button onClick={() => setShowTranslation(!showTranslation)} className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer">
                     <Languages size={12} />
                     {showTranslation ? 'Hide Meaning' : 'Show Meaning'}
                   </button>
-                  <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
+                  <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
                     <Mic size={32} className="text-white" />
                   </button>
                 </>
@@ -634,7 +685,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                   <div className="bg-indigo-50 dark:bg-indigo-900/30 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
                     <h3 className="text-3xl font-bold text-[#4F46E5] dark:text-indigo-400">"{currentSubTask?.translation || currentSubTask?.native || '...'}"</h3>
                   </div>
-                  <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
+                  <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
                     <Mic size={32} className="text-white" />
                   </button>
                 </>
@@ -654,7 +705,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                           setFeedback({ status: null, text: '' });
                           setShowTranslation(false);
                         }}
-                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-xl font-bold shadow-sm hover:bg-indigo-600 transition-all"
+                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-xl font-bold shadow-sm hover:bg-indigo-600 transition-all cursor-pointer"
                       >
                         {word}
                       </button>
@@ -680,7 +731,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                             setFeedback({ status: null, text: '' });
                             setShowTranslation(false);
                           }}
-                          className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl font-bold text-[#111827] dark:text-white hover:border-[#4F46E5] transition-all"
+                          className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl font-bold text-[#111827] dark:text-white hover:border-[#4F46E5] transition-all cursor-pointer"
                         >
                           {word}
                         </button>
@@ -695,14 +746,14 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                         setFeedback({ status: null, text: '' });
                         setShowTranslation(false);
                       }}
-                      className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                      className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 flex items-center gap-1 cursor-pointer"
                     >
                       <RefreshCw size={14} /> Reset
                     </button>
                     <button 
                       onClick={handleCheckArrangement}
                       disabled={userArrangement.length === 0}
-                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50 transition-all"
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50 transition-all cursor-pointer"
                     >
                       Check Answer
                     </button>
@@ -719,7 +770,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                         key={i}
                         disabled={selectedOption !== null}
                         onClick={() => handleOptionSelect(option, currentSubTask.answer, currentSubTask.explanation)}
-                        className={`w-full text-left p-4 rounded-2xl border transition-all font-medium ${
+                        className={`w-full text-left p-4 rounded-2xl border transition-all font-medium cursor-pointer ${
                           selectedOption === option
                             ? option === currentSubTask.answer
                               ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
@@ -764,7 +815,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                           </p>
                           <button 
                             onClick={() => handleSpeak(currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer)}
-                            className="p-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 rounded-lg"
+                            className="p-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 rounded-lg cursor-pointer"
                           >
                             <Volume2 size={16} />
                           </button>
@@ -795,7 +846,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                     {feedback.status === 'incorrect' && (
                       <button 
                         onClick={handleRetake}
-                        className="flex items-center gap-1 bg-amber-200 dark:bg-amber-900/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-300 transition-colors shrink-0"
+                        className="flex items-center gap-1 bg-amber-200 dark:bg-amber-900/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-300 transition-colors shrink-0 cursor-pointer"
                       >
                         <RefreshCw size={14} />
                         Retake
