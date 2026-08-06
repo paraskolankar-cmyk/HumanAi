@@ -107,12 +107,12 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
 
   const currentSubTask = dailyTasks ? (
     taskType === 'sentences' 
-      ? dailyTasks.sentences?.[taskIndex] 
+      ? dailyTasks.sentences[taskIndex] 
       : taskType === 'translations' 
-      ? dailyTasks.translations?.[taskIndex] 
+      ? dailyTasks.translations[taskIndex] 
       : taskType === 'arrangements'
-      ? dailyTasks.arrangements?.[taskIndex]
-      : dailyTasks.mcqs?.[taskIndex]
+      ? dailyTasks.arrangements[taskIndex]
+      : dailyTasks.mcqs[taskIndex]
   ) : null;
 
   const normalizeText = (str: string) => {
@@ -231,7 +231,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
-  // CLEAN AND SAFE DAILY PRACTICE LOADER
   const startDailyPractice = async (month: number, day: number) => {
     const dayKey = `${month}-${day}`;
     if (!completedDays[dayKey]) {
@@ -260,17 +259,13 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setIsLoadingTasks(true);
     try {
       const tasks = await humanAiService.generateDailyTasks(userLevel || 'Beginner', month, day, targetLanguage);
-      if (tasks && (tasks.sentences || tasks.mcqs)) {
-        setDailyTasks(tasks);
-        setTaskType('sentences');
-        setTaskIndex(0);
-        setView('practice');
-      } else {
-        throw new Error("Failed to load task structure");
-      }
+      setDailyTasks(tasks);
+      setTaskType('sentences');
+      setTaskIndex(0);
+      setView('practice');
     } catch (error: any) {
       console.error("Failed to load tasks", error);
-      alert("Loading practice content...");
+      alert("The AI is currently busy. Please wait a few seconds and try clicking again.");
     } finally {
       setIsLoadingTasks(false);
     }
@@ -316,7 +311,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setSelectedOption(null);
     setUserArrangement([]);
 
-    if (taskType === 'mcqs' && taskIndex === (dailyTasks?.mcqs?.length || 1) - 1) {
+    if (taskType === 'mcqs' && taskIndex === dailyTasks.mcqs.length - 1) {
       const dayKey = `${selectedMonth}-${selectedDay}`;
       const nextDay = selectedDay < 28 ? selectedDay + 1 : 1;
       const nextMonth = selectedDay < 28 ? selectedMonth : selectedMonth + 1;
@@ -363,21 +358,21 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       setShowCompletionModal(true);
     } else {
       if (taskType === 'sentences') {
-        if (taskIndex < (dailyTasks?.sentences?.length || 1) - 1) {
+        if (taskIndex < dailyTasks.sentences.length - 1) {
           setTaskIndex(taskIndex + 1);
         } else {
           setTaskType('translations');
           setTaskIndex(0);
         }
       } else if (taskType === 'translations') {
-        if (taskIndex < (dailyTasks?.translations?.length || 1) - 1) {
+        if (taskIndex < dailyTasks.translations.length - 1) {
           setTaskIndex(taskIndex + 1);
         } else {
           setTaskType('arrangements');
           setTaskIndex(0);
         }
       } else if (taskType === 'arrangements') {
-        if (taskIndex < (dailyTasks?.arrangements?.length || 1) - 1) {
+        if (taskIndex < dailyTasks.arrangements.length - 1) {
           setTaskIndex(taskIndex + 1);
         } else {
           setTaskType('mcqs');
@@ -637,7 +632,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 <div className="w-full max-w-xl space-y-8">
                   <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50 space-y-4">
                     <p className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider">Arrange words matching this meaning:</p>
-                    <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask?.translation}</h3>
+                    <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask.translation}</h3>
                   </div>
 
                   <div className="min-h-[60px] p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 items-center justify-center">
@@ -661,7 +656,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
 
                   <div className="flex flex-wrap gap-2 justify-center">
                     {(() => {
-                      const availableWords = [...(currentSubTask?.jumbled || [])];
+                      const availableWords = [...(currentSubTask.jumbled || [])];
                       userArrangement.forEach(word => {
                         const index = availableWords.indexOf(word);
                         if (index !== -1) availableWords.splice(index, 1);
@@ -706,10 +701,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               ) : (
                 <div className="w-full max-w-xl space-y-8">
                   <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50 space-y-4">
-                    <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask?.question}</h3>
+                    <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask.question}</h3>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
-                    {currentSubTask?.options?.map((option: string, i: number) => (
+                    {currentSubTask.options.map((option: string, i: number) => (
                       <button
                         key={i}
                         disabled={selectedOption !== null}
