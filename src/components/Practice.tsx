@@ -14,7 +14,6 @@ import {
   Check,
   ChevronLeft,
   Shield,
-  HelpCircle,
   Award,
   Trophy,
   Zap,
@@ -35,7 +34,6 @@ interface PracticeProps {
   onTabChange?: (tabId: string) => void;
 }
 
-// 5 FIXED ASSESSMENT QUESTIONS FOR ACCURATE LEVEL TESTING
 const ASSESSMENT_QUESTIONS = [
   {
     question: "1. Choose the correct sentence for daily habit:",
@@ -381,10 +379,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setSelectedOption(null);
     setUserArrangement([]);
 
-    const mcqLength = dailyTasks?.mcqs?.length || 1;
-    const sentenceLength = dailyTasks?.sentences?.length || 1;
-    const translationLength = dailyTasks?.translations?.length || 1;
-    const arrangementLength = dailyTasks?.arrangements?.length || 1;
+    const mcqLength = dailyTasks?.mcqs?.length || 0;
+    const sentenceLength = dailyTasks?.sentences?.length || 0;
+    const translationLength = dailyTasks?.translations?.length || 0;
+    const arrangementLength = dailyTasks?.arrangements?.length || 0;
 
     if (taskType === 'mcqs' && taskIndex === mcqLength - 1) {
       const dayKey = `${selectedMonth}-${selectedDay}`;
@@ -456,6 +454,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   };
 
+  // DYNAMICALLY CALCULATE CURRENT QUESTION INDEX OUT OF TOTAL (20 TO 30 RANGE)
   const getCurrentQuestionNumber = () => {
     if (!dailyTasks) return 1;
     const sentenceCount = dailyTasks.sentences?.length || 0;
@@ -469,7 +468,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   };
 
   const getTotalQuestionsCount = () => {
-    if (!dailyTasks) return 1;
+    if (!dailyTasks) return 20;
     return (dailyTasks.sentences?.length || 0) +
            (dailyTasks.translations?.length || 0) +
            (dailyTasks.arrangements?.length || 0) +
@@ -679,7 +678,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
-  // 3. PRACTICE TASKS VIEW
+  // 3. PRACTICE TASKS VIEW (DISPLAYING DYNAMICALLY 20 TO 30 QUESTIONS)
   if (view === 'practice' && dailyTasks && currentSubTask) {
     return (
       <div className="max-w-4xl mx-auto space-y-8 relative">
