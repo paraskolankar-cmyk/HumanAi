@@ -2,14 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Send, 
   Mic, 
-  MicOff, 
   X,
   Maximize2,
   MessageCircle,
   AlertCircle,
   Languages,
   Loader2,
-  Volume2
+  Volume2,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService } from '@/src/services/geminiService';
@@ -26,7 +26,6 @@ interface Message {
   timestamp?: number;
 }
 
-// Add type for SpeechRecognition
 declare global {
   interface Window {
     SpeechRecognition: any;
@@ -46,7 +45,7 @@ interface ConversationProps {
 const DEFAULT_WELCOME_MESSAGE: Message = { 
   id: '1', 
   role: 'ai', 
-  text: "Hello! I'm your AI tutor. How can I help you today?",
+  text: "Hello! I'm HumnAi, your English companion. What would you like to chat about today?",
   timestamp: Date.now()
 };
 
@@ -82,8 +81,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   };
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  
-  // Voice recognition refs
   const recognitionRef = useRef<any>(null);
   const isSpeakingRef = useRef(false);
 
@@ -101,20 +98,17 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     const loadHistory = async () => {
       let activeMessages: Message[] = [];
 
-      // A. LocalStorage Check (with Timestamp expiration)
       const localData = localStorage.getItem(storageKey);
       if (localData) {
         try {
           const parsed = JSON.parse(localData);
           const savedMessages: Message[] = parsed.messages || [];
           
-          // Filter out messages older than 24 hours
           activeMessages = savedMessages.filter(msg => {
             const msgTime = msg.timestamp || parsed.timestamp || now;
             return now - msgTime < TWENTY_FOUR_HOURS_MS;
           });
 
-          // If all messages expired, clear local storage
           if (activeMessages.length === 0 && savedMessages.length > 0) {
             localStorage.removeItem(storageKey);
           }
@@ -123,7 +117,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         }
       }
 
-      // B. Database Fetch Fallback / Sync
       if (email && activeMessages.length === 0) {
         try {
           const history = await dbService.getChatHistory(email);
@@ -138,7 +131,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
               timestamp: m.created_at ? new Date(m.created_at).getTime() : now
             }));
 
-            // Filter out database messages older than 24 hours
             activeMessages = dbMessages.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
           }
         } catch (err) {
@@ -146,7 +138,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         }
       }
 
-      // Set valid active messages or fallback to default welcome message
       if (activeMessages.length > 0) {
         setMessages(activeMessages);
       } else {
@@ -161,7 +152,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     scrollToBottom();
   }, [messages]);
 
-  // Helper to persist messages with timestamp
+  // Persist messages to LocalStorage
   const persistMessages = (updatedMessages: Message[]) => {
     setMessages(updatedMessages);
 
@@ -174,7 +165,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     }));
   };
 
-  // Initialize Speech Recognition once
+  // Clear Chat History
+  const clearChatHistory = () => {
+    if (confirm("Are you sure you want to clear your conversation history?")) {
+      const defaultMsg: Message[] = [DEFAULT_WELCOME_MESSAGE];
+      persistMessages(defaultMsg);
+    }
+  };
+
+  // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -226,11 +225,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       };
 
       recognitionRef.current = recognition;
-    } else {
-      console.warn("Speech recognition not supported in this browser.");
     }
 
-    // Load voices
     const updateVoices = () => {
       window.speechSynthesis.getVoices();
     };
@@ -246,14 +242,13 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   }, [speechInputLang, targetLanguage]);
 
   const speak = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
-    window.speechSynthesis.cancel(); // Stop any current speech
+    window.speechSynthesis.cancel();
     
     isSpeakingRef.current = true;
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
-    utterance.rate = 0.9;
-    utterance.pitch = 1.0;
+    utterance.rate = 0.95;
     
     const voices = window.speechSynthesis.getVoices();
     let preferredVoice;
@@ -323,14 +318,16 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      const correctionData = await humanAiService.correctSentence(transcript, targetLanguage);
-      const aiResponseText = correctionData.response || "I understand. Tell me more!";
+      // Pass history context array so AI remembers previous messages
+      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
+      const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
+      const aiResponseText = correctionData.response || `That sounds really interesting! Tell me more about "${transcript}".`;
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
         text: aiResponseText,
-        correction: correctionData.corrected && correctionData.corrected !== transcript ? correctionData.corrected : undefined,
+        correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== transcript.toLowerCase() ? correctionData.corrected : undefined,
         translation: correctionData.translation,
         explanation: correctionData.explanation,
         timestamp: Date.now()
@@ -397,13 +394,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      const correctionData = await humanAiService.correctSentence(formattedInput, targetLanguage);
+      // Pass history context array for human-like conversational replies
+      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
+      const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        text: correctionData.response || "I understand. Can you explain that in more detail?",
-        correction: correctionData.corrected && correctionData.corrected !== formattedInput ? correctionData.corrected : undefined,
+        text: correctionData.response || `That's great! What else would you like to explore about "${formattedInput}"?`,
+        correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase() ? correctionData.corrected : undefined,
         translation: correctionData.translation,
         explanation: correctionData.explanation,
         timestamp: Date.now()
@@ -457,9 +456,17 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
               <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Chats auto-erase after 24 hrs</p>
             </div>
           </div>
+
+          <button 
+            onClick={clearChatHistory} 
+            title="Clear Chat History"
+            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+          >
+            <Trash2 size={18} />
+          </button>
         </div>
 
-        {/* Messages */}
+        {/* Messages List */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#F9FAFB] dark:bg-[#111827]">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -468,7 +475,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                   <Logo collapsed={true} size="sm" />
                 </div>
               )}
-              <div className={`max-w-[80%] space-y-2`}>
+              <div className="max-w-[80%] space-y-2">
                 <div className={`p-4 rounded-2xl shadow-sm relative group ${
                   msg.role === 'user' 
                     ? 'bg-[#4F46E5] text-white rounded-tr-none' 
@@ -483,7 +490,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                           setTimeout(() => speak(msg.explanation!, langMap[targetLanguage] || 'hi-IN'), 2000);
                         }
                       }}
-                      className="absolute top-2 right-2 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      className="absolute top-2 right-2 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
                     >
                       <Volume2 size={14} />
                     </button>
@@ -498,9 +505,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                   >
                     <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
                       <AlertCircle size={14} />
-                      <span className="text-xs font-bold uppercase tracking-wider">Correction</span>
+                      <span className="text-xs font-bold uppercase tracking-wider">Natural Refinement</span>
                     </div>
-                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">Use "{msg.correction}" instead</p>
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">"{msg.correction}"</p>
                     
                     {msg.explanation && (
                       <div className="bg-white/50 dark:bg-black/20 p-2 rounded-lg mt-1">
@@ -519,10 +526,11 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
               </div>
             </div>
           ))}
+
           {isProcessing && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 p-3 rounded-2xl flex items-center gap-2 text-[#6B7280] dark:text-gray-400">
-                <Loader2 size={16} className="animate-spin" />
+                <Loader2 size={16} className="animate-spin text-indigo-600" />
                 <span className="text-sm">Thinking...</span>
               </div>
             </div>
@@ -530,7 +538,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input */}
+        {/* Input Form */}
         <form onSubmit={handleSendMessage} className="p-4 bg-white dark:bg-[#1F2937] border-t border-[#E5E7EB] dark:border-gray-800 flex items-center gap-3">
           <div className="flex items-center gap-1">
             <div className="relative">
@@ -547,7 +555,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                     }
                   }
                 }}
-                className={`p-2 rounded-xl transition-all ${isListening ? 'bg-indigo-100 dark:bg-indigo-900/40 text-[#4F46E5] dark:text-indigo-400' : 'text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800'}`}
+                className={`p-2 rounded-xl transition-all cursor-pointer ${isListening ? 'bg-indigo-100 dark:bg-indigo-900/40 text-[#4F46E5] dark:text-indigo-400' : 'text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800'}`}
               >
                 <Mic size={20} />
               </button>
@@ -559,7 +567,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             <button
               type="button"
               onClick={() => setSpeechInputLang(prev => prev === 'en-US' ? 'native' : 'en-US')}
-              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
+              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
                 speechInputLang === 'en-US' 
                   ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/30' 
                   : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30'
@@ -577,7 +585,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
           />
           <button 
             type="submit"
-            className="p-2.5 bg-[#4F46E5] text-white rounded-xl hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-100 dark:shadow-none shrink-0"
+            disabled={!inputText.trim() || isProcessing}
+            className="p-2.5 bg-[#4F46E5] hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl transition-colors shadow-lg shadow-indigo-100 dark:shadow-none shrink-0 cursor-pointer"
           >
             <Send size={20} />
           </button>
