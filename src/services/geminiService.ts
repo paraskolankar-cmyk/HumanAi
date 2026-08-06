@@ -128,7 +128,6 @@ export const humanAiService = {
     } catch (error) {
       console.error("Roadmap generation failed, serving fallback 12-month plan", error);
 
-      // GUARANTEED 12-MONTH FALLBACK ROADMAP WITH PROFESSION TAILORING
       const defaultThemes = [
         { theme: `Foundations & Professional Intro for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary", "Professional introduction"] },
         { theme: "Present & Past Tenses in Work", objectives: ["Simple Present Tense in daily work", "Simple Past Tense for tasks", "Action verbs"] },
@@ -154,6 +153,7 @@ export const humanAiService = {
     }
   },
 
+  // DAILY TASKS GENERATOR (MINIMUM 20, MAXIMUM 30 QUESTIONS TOTAL)
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
@@ -162,54 +162,94 @@ export const humanAiService = {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
           contents: `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
-          Provide:
-          1. Short sentences for speaking practice.
-          2. Translation tasks.
-          3. Grammar MCQs.
-          4. Sentence arrangement tasks.
+          CRITICAL CONSTRAINT: Generate BETWEEN 20 AND 30 PRACTICE QUESTIONS IN TOTAL (MINIMUM 20, MAXIMUM 30).
+          
+          Provide questions across these 4 categories (5 to 8 questions per category):
+          1. 5 to 8 short sentences for speaking practice (with ${userLanguage} translation).
+          2. 5 to 8 translation tasks (provide native ${userLanguage} sentence to translate into English).
+          3. 5 to 8 sentence arrangement tasks (jumbled word array with correct sentence).
+          4. 5 to 8 grammar multiple choice questions (MCQs with 4 options, answer, and explanation in ${userLanguage}).
           
           Return JSON format strictly:
           { 
-            "sentences": [ { "english": "Hello, how are you?", "translation": "नमस्ते, आप कैसे हैं?" } ], 
-            "translations": [ { "translation": "मैं अंग्रेजी सीख रहा हूँ।", "english": "I am learning English." } ],
-            "mcqs": [ { "question": "She ___ to school daily.", "options": ["go", "goes", "going", "gone"], "answer": "goes", "explanation": "Third person singular takes 'goes'.", "translation": "वह रोज स्कूल जाती है।" } ],
-            "arrangements": [ { "jumbled": ["learning", "am", "English", "I"], "correct": "I am learning English", "translation": "मैं अंग्रेजी सीख रहा हूँ।" } ]
+            "sentences": [ 
+              { "english": "I start my work early.", "translation": "मैं अपना काम जल्दी शुरू करता हूँ।" },
+              { "english": "She speaks English fluently.", "translation": "वह धाराप्रवाह अंग्रेजी बोलती है।" },
+              { "english": "We completed the project on time.", "translation": "हमने प्रोजेक्ट समय पर पूरा किया।" },
+              { "english": "Are you ready for the meeting?", "translation": "क्या आप बैठक के लिए तैयार हैं?" },
+              { "english": "Practice makes a person confident.", "translation": "अभ्यास व्यक्ति को आत्मविश्वासी बनाता है।" },
+              { "english": "Clear goals bring better results.", "translation": "स्पष्ट लक्ष्य बेहतर परिणाम लाते हैं।" }
+            ], 
+            "translations": [ 
+              { "translation": "आज का दिन बहुत अच्छा है।", "english": "Today is a very good day." },
+              { "translation": "मुझे नई चीजें सीखना पसंद है।", "english": "I like learning new things." },
+              { "translation": "क्या आप मेरी मदद कर सकते हैं?", "english": "Can you help me?" },
+              { "translation": "वह हर दिन अभ्यास करता है।", "english": "He practices every day." },
+              { "translation": "हम कल मिलेंगे।", "english": "We will meet tomorrow." },
+              { "translation": "यह एक महत्वपूर्ण कार्य है।", "english": "This is an important task." }
+            ],
+            "arrangements": [
+              { "jumbled": ["learning", "am", "English", "I"], "correct": "I am learning English", "translation": "मैं अंग्रेजी सीख रहा हूँ।" },
+              { "jumbled": ["is", "great", "day", "a", "Today"], "correct": "Today is a great day", "translation": "आज एक बेहतरीन दिन है।" },
+              { "jumbled": ["hard", "works", "every", "She", "day"], "correct": "She works hard every day", "translation": "वह हर दिन कड़ी मेहनत करती है।" },
+              { "jumbled": ["us", "with", "Come", "now"], "correct": "Come with us now", "translation": "अब हमारे साथ आओ।" },
+              { "jumbled": ["ready", "the", "for", "test", "Be"], "correct": "Be ready for the test", "translation": "परीक्षा के लिए तैयार रहें।" },
+              { "jumbled": ["time", "save", "will", "This"], "correct": "This will save time", "translation": "इससे समय की बचत होगी।" }
+            ],
+            "mcqs": [ 
+              { "question": "She ___ to office every day.", "options": ["go", "goes", "going", "gone"], "answer": "goes", "explanation": "Singular subject uses 'goes'.", "translation": "वह रोज दफ्तर जाती है।" },
+              { "question": "They ___ completed the task yesterday.", "options": ["have", "had", "did", "was"], "answer": "had", "explanation": "Completed past event uses 'had'.", "translation": "उन्होंने कल काम पूरा कर लिया था।" },
+              { "question": "I am good ___ English.", "options": ["in", "at", "on", "with"], "answer": "at", "explanation": "Preposition 'at' is used with skills.", "translation": "मैं अंग्रेजी में अच्छा हूँ।" },
+              { "question": "Identify the adjective: 'It is a beautiful city.'", "options": ["It", "city", "beautiful", "is"], "answer": "beautiful", "explanation": "'Beautiful' describes the noun 'city'.", "translation": "विशेषण पहचानें:" },
+              { "question": "Choose the correct sentence:", "options": ["He don't know", "He doesn't know", "He not know", "He isn't know"], "answer": "He doesn't know", "explanation": "Singular 'He' uses 'doesn't'.", "translation": "सही वाक्य चुनें:" },
+              { "question": "We ___ waiting for your reply.", "options": ["is", "are", "was", "be"], "answer": "are", "explanation": "Plural subject 'We' uses 'are'.", "translation": "हम आपके जवाब का इंतजार कर रहे हैं।" }
+            ]
           }`,
           config: { responseMimeType: "application/json" }
         });
 
         const parsed = safeJsonParse(response.text);
-        if (parsed && (parsed.sentences || parsed.mcqs)) {
+        const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
+        
+        if (parsed && total >= 15) {
           return parsed;
         }
-        throw new Error("Invalid Tasks Structure");
+        throw new Error("Tasks count below required minimum");
       });
     } catch (error) {
-      console.error("Daily Tasks Generation Error. Serving Fallback Tasks.", error);
+      console.error("Daily Tasks Generation Error. Serving 24 Fallback Tasks.", error);
       return {
         sentences: [
-          { english: "I am learning English every day.", translation: "मैं हर दिन अंग्रेजी सीख रहा हूँ।" },
-          { english: "Practice makes a person perfect.", translation: "अभ्यास इंसान को बेहतर बनाता है।" }
+          { english: "I practice English every single day.", translation: "मैं हर दिन अंग्रेजी का अभ्यास करता हूँ।" },
+          { english: "Communication skills build confidence.", translation: "संचार कौशल आत्मविश्वास का निर्माण करते हैं।" },
+          { english: "He works hard to achieve his goals.", translation: "वह अपने लक्ष्यों को पाने के लिए कड़ी मेहनत करता है।" },
+          { english: "We are learning new vocabulary today.", translation: "हम आज नई शब्दावली सीख रहे हैं।" },
+          { english: "Never give up on your dreams.", translation: "अपने सपनों को कभी मत छोड़ो।" },
+          { english: "Clear communication solves many problems.", translation: "स्पष्ट बातचीत कई समस्याओं को हल करती है।" }
         ],
         translations: [
-          { translation: "आपका नाम क्या है?", english: "What is your name?" },
-          { translation: "मैं आज बहुत खुश हूँ।", english: "I am very happy today." }
-        ],
-        mcqs: [
-          {
-            question: "Choose the correct sentence:",
-            options: ["He go to market", "He goes to market", "He going to market", "He gone to market"],
-            answer: "He goes to market",
-            explanation: "Singular subject 'He' uses 'goes' in simple present tense.",
-            translation: "सही वाक्य चुनें:"
-          }
+          { translation: "आपका दिन शुभ हो।", english: "Have a nice day." },
+          { translation: "मैं अंग्रेजी में बात कर सकता हूँ।", english: "I can speak in English." },
+          { translation: "वह बहुत प्रतिभाशाली है।", english: "She is very talented." },
+          { translation: "क्या आप तैयार हैं?", english: "Are you ready?" },
+          { translation: "सफलता अभ्यास से आती है।", english: "Success comes from practice." },
+          { translation: "समय बहुत मूल्यवान है।", english: "Time is very valuable." }
         ],
         arrangements: [
-          {
-            jumbled: ["a", "good", "student", "He", "is"],
-            correct: "He is a good student",
-            translation: "वह एक अच्छा छात्र है।"
-          }
+          { jumbled: ["English", "learning", "am", "I", "daily"], correct: "I am learning English daily", translation: "मैं रोज अंग्रेजी सीख रहा हूँ।" },
+          { jumbled: ["a", "is", "great", "leader", "He"], correct: "He is a great leader", translation: "वह एक महान नेता है।" },
+          { jumbled: ["hard", "Work", "achieve", "to", "success"], correct: "Work hard to achieve success", translation: "सफलता पाने के लिए कड़ी मेहनत करें।" },
+          { jumbled: ["fluently", "speaks", "She", "English"], correct: "She speaks English fluently", translation: "वह धाराप्रवाह अंग्रेजी बोलती है।" },
+          { jumbled: ["time", "on", "Be", "always"], correct: "Always be on time", translation: "हमेशा समय पर रहें।" },
+          { jumbled: ["makes", "Practice", "man", "a", "perfect"], correct: "Practice makes a man perfect", translation: "अभ्यास इंसान को निपुण बनाता है।" }
+        ],
+        mcqs: [
+          { question: "He ___ to market yesterday.", options: ["go", "went", "gone", "going"], answer: "went", explanation: "Past tense of 'go' is 'went'.", translation: "वह कल बाजार गया था।" },
+          { question: "She is ___ than her sister.", options: ["tall", "taller", "tallest", "more tall"], answer: "taller", explanation: "Comparative degree uses 'taller'.", translation: "वह अपनी बहन से लंबी है।" },
+          { question: "They ___ playing football now.", options: ["is", "are", "was", "be"], answer: "are", explanation: "Plural 'They' takes 'are'.", translation: "वे अभी फुटबॉल खेल रहे हैं।" },
+          { question: "Find the noun: 'Honesty is the best policy.'", options: ["is", "best", "Honesty", "the"], answer: "Honesty", explanation: "'Honesty' is an abstract noun.", translation: "संज्ञा पहचानें:" },
+          { question: "Choose the correct sentence:", options: ["She like ice cream", "She likes ice cream", "She liking ice cream", "She is like ice cream"], answer: "She likes ice cream", explanation: "Third-person singular takes 'likes'.", translation: "सही वाक्य चुनें:" },
+          { question: "We ___ finished the assignment.", options: ["has", "have", "is", "was"], answer: "have", explanation: "Plural 'We' takes 'have' in present perfect.", translation: "हमने असाइनमेंट पूरा कर लिया है।" }
         ]
       };
     }
