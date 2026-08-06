@@ -68,7 +68,6 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GE
 export function safeJsonParse(text: string | undefined): any {
   if (!text) return {};
   try {
-    // Clean markdown codeblocks if present (e.g. ```json ... ```)
     let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
     const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -90,31 +89,33 @@ export const getGeminiModel = (modelName = "gemini-2.5-flash") => {
 };
 
 export const humanAiService = {
-  async assessLevel(testAnswers: string) {
+  // 5 QUESTIONS & PROFESSION BASED LEVEL ASSESSMENT
+  async assessLevel(testAnswers: string | string[], profession: string = "General") {
+    const formattedAnswers = Array.isArray(testAnswers) ? testAnswers.join(', ') : testAnswers;
     try {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `Assess the English level (Beginner, Intermediate, Advanced) based on these answers: ${testAnswers}. Return JSON with level and a brief explanation.`,
+          contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
           config: { responseMimeType: "application/json" }
         });
         const parsed = safeJsonParse(response.text);
-        return parsed.level ? parsed : { level: "Intermediate", explanation: "Based on level assessment." };
+        return parsed.level ? parsed : { level: "Intermediate", explanation: "Evaluated from assessment test." };
       });
     } catch (e) {
       return { level: "Beginner", explanation: "Default starting level." };
     }
   },
 
-  // FIXED 12-MONTH ROADMAP PLAN GENERATOR WITH GUARANTEED FALLBACK
-  async generateLearningPlan(level: string) {
+  // PROFESSION & LEVEL TAILORED 12-MONTH ROADMAP GENERATOR
+  async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `Create a 12-month high-level English learning roadmap for a ${level} level student. 
-          For each month (1 to 12), provide a theme and key learning objectives. 
-          Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... ] }`,
+          contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
+          Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
+          Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
           config: { responseMimeType: "application/json" }
         });
 
@@ -127,20 +128,20 @@ export const humanAiService = {
     } catch (error) {
       console.error("Roadmap generation failed, serving fallback 12-month plan", error);
 
-      // GUARANTEED 12-MONTH FALLBACK ROADMAP FOR PRACTICE SECTION
+      // GUARANTEED 12-MONTH FALLBACK ROADMAP WITH PROFESSION TAILORING
       const defaultThemes = [
-        { theme: "Foundations & Basics", objectives: ["Basic sentence formation", "Essential daily vocabulary", "Alphabet & Phonics rules"] },
-        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense usage", "Simple Past Tense usage", "Regular & Irregular verbs"] },
-        { theme: "Future Tense & Modals", objectives: ["Future Tense structure", "Modals (Can, Could, Should)", "Daily routine practice"] },
-        { theme: "Nouns, Pronouns & Adjectives", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives"] },
-        { theme: "Verbs & Sentence Patterns", objectives: ["Verb Forms (V1 to V4)", "Subject-Verb Agreement", "Sentence Transformations"] },
-        { theme: "Prepositions & Conjunctions", objectives: ["Prepositions of Place & Time", "Connecting Sentences", "Common Errors"] },
-        { theme: "Voice Transformation", objectives: ["Active Voice Rules", "Passive Voice Rules", "Conversations in Passive Voice"] },
-        { theme: "Direct & Indirect Narration", objectives: ["Direct Speech Rules", "Indirect Speech Conversion", "Reporting Verbs"] },
-        { theme: "Advanced Vocabulary & Idioms", objectives: ["High-frequency Idioms", "Phrasal Verbs", "Contextual Vocabulary"] },
-        { theme: "Reading & Error Spotting", objectives: ["Comprehension Practice", "Error Spotting Drills", "Sentence Rearrangement"] },
-        { theme: "Conversational Fluency", objectives: ["Speaking without Hesitation", "Public Speaking Basics", "Professional Emails"] },
-        { theme: "Mastery & Review", objectives: ["Advanced Grammar Inversion", "Complete Course Review", "Fluency Certification Practice"] }
+        { theme: `Foundations & Professional Intro for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary", "Professional introduction"] },
+        { theme: "Present & Past Tenses in Work", objectives: ["Simple Present Tense in daily work", "Simple Past Tense for tasks", "Action verbs"] },
+        { theme: "Future Tense & Polite Modals", objectives: ["Future projections & goal setting", "Modals (Could, Would, Should)", "Scheduling meetings"] },
+        { theme: "Nouns, Pronouns & Professional Writing", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive terms for reports"] },
+        { theme: "Verbs & Sentence Accuracy", objectives: ["Verb Forms (V1 to V4)", "Subject-Verb Agreement", "Avoiding common errors"] },
+        { theme: "Prepositions & Email Communication", objectives: ["Prepositions of Place & Time", "Formal Email Etiquette", "Connecting ideas"] },
+        { theme: "Active & Passive Voice in Business", objectives: ["Active Voice Rules", "Passive Voice in Documentation", "Sentence Transformation"] },
+        { theme: "Direct & Indirect Speech", objectives: ["Direct Speech Rules", "Reporting conversations", "Handling workplace feedback"] },
+        { theme: "Advanced Vocabulary & Industry Terms", objectives: ["High-frequency Corporate Idioms", "Phrasal Verbs for work", "Contextual Vocabulary"] },
+        { theme: "Reading & Error Spotting", objectives: ["Comprehension Practice", "Grammatical Error Spotting", "Rearranging Jumbled Ideas"] },
+        { theme: "Conversational & Interview Fluency", objectives: ["Speaking without Hesitation", "Answering Interview / Meeting Questions", "Public Speaking Confidence"] },
+        { theme: "Mastery & Final Career Review", objectives: ["Advanced Grammar Inversion", "Full Mock Practice", "Complete Fluency Review"] }
       ];
 
       return {
