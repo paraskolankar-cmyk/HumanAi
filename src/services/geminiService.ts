@@ -68,8 +68,12 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GE
 export function safeJsonParse(text: string | undefined): any {
   if (!text) return {};
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const cleanText = jsonMatch ? jsonMatch[0] : text;
+    // Clean markdown codeblocks if present (e.g. ```json ... ```)
+    let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      cleanText = jsonMatch[0];
+    }
     return JSON.parse(cleanText);
   } catch (e) {
     console.error("Failed to parse Gemini response as JSON:", text);
@@ -171,12 +175,10 @@ export const humanAiService = {
     }
   },
 
-  // CACHED LEARNING CONTENT GENERATOR (Flexibly structured)
   async getDailyLearningContent(category: string, level: string, dayNumber: number = 1, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
     const cacheKey = `humnai_cache_module_${category}_day${dayNumber}_${userLanguage.toLowerCase()}`;
 
-    // 1. LOCAL STORAGE CACHE CHECK
     if (typeof window !== 'undefined') {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
@@ -185,114 +187,48 @@ export const humanAiService = {
           if (parsed && (parsed.vocabulary || parsed.explanation || parsed.topic)) {
             return parsed;
           }
-        } catch (e) {
-          console.warn("Cache parse failed, generating fresh content...", e);
-        }
+        } catch (e) {}
       }
     }
 
-    // 2. IF NOT CACHED -> CALL GEMINI AI
     return withRetry(async (ai) => {
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level.
-
-        SOURCES/STYLE TO ADHERE TO:
-        Standard reference materials like "Black Book of English Vocabulary", "SP Bakshi Objective General English", and "Plinth to Paramount by Neetu Singh".
 
         REQUIREMENTS BY CATEGORY:
         1. Topic: Create a Day ${dayNumber} specific topic title.
         2. Content & Explanation: Provide a detailed explanation in English AND a complete translation in ${userLanguage}.
         
         3. Vocabulary Specific (If category is "Vocabulary" or "Synonyms & Antonyms"):
-           - Provide relevant, high-quality Words/Pairs for today's lesson.
-           - Each item MUST have:
-             * word: English Word
-             * meaning: Clear English meaning
-             * translation: Native meaning in ${userLanguage}
-             * example: A practice example sentence
+           - Provide Words/Pairs with English Word, Meaning, ${userLanguage} Translation, and Example sentence.
 
         4. Verbs Specific (If category is "Verbs"):
-           - Provide Verbs with all 4 forms:
-             * v1: Base form
-             * v2: Past form
-             * v3: Past participle
-             * v4: Present participle (-ing)
-             * translation: Meaning in ${userLanguage}
-             * example: Example sentence
+           - Provide Verbs with v1, v2, v3, v4, ${userLanguage} translation, and example sentence.
 
         5. Noun, Pronoun, Voice, Narration, Tenses & Grammar Specific:
-           - Provide important Grammar Rules in "rules".
-           - Rule explanations in English and ${userLanguage}.
-           - For Tenses: Clear formula string in "tenseStructure".
-           - Example Sentences.
+           - Provide 3-5 Important Grammar Rules in "rules", formula in "tenseStructure", and Example Sentences.
 
         6. Practice Questions:
-           - Provide MCQs related to the lesson.
-           - Question Text, Translation in ${userLanguage}, 4 Options, Correct Answer, and Detailed Explanation in ${userLanguage}.
+           - Provide 5 MCQs with Question Text, Translation in ${userLanguage}, 4 Options, Correct Answer, and Explanation.
 
-        Return JSON format:
-        {
-          "topic": "Day ${dayNumber}: Topic Title",
-          "explanation": "Detailed explanation in English",
-          "explanationTranslation": "Explanation in ${userLanguage}",
-          "rules": ["Rule 1", "Rule 2"],
-          "vocabulary": [
-            { "word": "Word", "meaning": "Meaning", "translation": "Native Translation", "example": "Sentence" }
-          ],
-          "synonymsAntonyms": [
-            { "word": "Word", "type": "synonym/antonym", "target": "Target", "meaning": "Meaning", "translation": "Native", "example": "Sentence" }
-          ],
-          "nouns": [
-            { "word": "Noun", "translation": "Native", "example": "Sentence" }
-          ],
-          "pronouns": [
-            { "word": "Pronoun", "translation": "Native", "example": "Sentence" }
-          ],
-          "verbs": [
-            { "v1": "v1", "v2": "v2", "v3": "v3", "v4": "v4", "translation": "Native", "example": "Sentence" }
-          ],
-          "voiceNarrationExamples": [
-            { "original": "Active/Direct", "transformed": "Passive/Indirect", "translation": "Native" }
-          ],
-          "posItems": [
-            { "word": "Word", "translation": "Native", "example": "Sentence" }
-          ],
-          "tenseStructure": "Structure Formula (If category is Tenses)",
-          "examples": [
-            { "english": "English sentence", "translation": "Translation in ${userLanguage}" }
-          ],
-          "questions": [
-            {
-              "id": 1,
-              "question": "Question text",
-              "translation": "Translation in ${userLanguage}",
-              "options": ["Option A", "Option B", "Option C", "Option D"],
-              "answer": "Correct Option",
-              "explanation": "Detailed explanation in ${userLanguage}"
-            }
-          ]
-        }`,
-        config: {
-          responseMimeType: "application/json",
-        }
+        Return JSON format.`,
+        config: { responseMimeType: "application/json" }
       });
 
       const parsed = safeJsonParse(response.text);
 
-      // SAVE TO LOCAL STORAGE CACHE PERMANENTLY
       if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
         try {
           localStorage.setItem(cacheKey, JSON.stringify(parsed));
-        } catch (e) {
-          console.warn("Storage quota full, skipping cache save", e);
-        }
+        } catch (e) {}
       }
 
       return parsed;
     });
   },
 
+  // DYNAMIC & REAL-TIME AI CHAT RESPONSE FIX
   async correctSentence(sentence: string, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
@@ -300,46 +236,57 @@ export const humanAiService = {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `You are an AI English Tutor. 
-          The user said: "${sentence}".
-          
-          Tasks:
-          1. Translate to natural English if non-English.
-          2. Correct grammatical errors.
-          3. Provide a friendly conversational reply in English.
-          4. Provide meaning of user's intent in ${userLanguage}.
-          5. Provide explanation in ${userLanguage} about grammar or structure.
-          
-          Return JSON with:
+          contents: `You are an empathetic, highly intelligent AI English Tutor named HumnAi.
+          The user sent this message in AI Chat: "${sentence}".
+
+          YOUR GOAL:
+          1. Understand what the user wants to discuss or ask (e.g. machine learning, daily talk, grammar question, etc.).
+          2. Give a direct, naturally engaging, and helpful response in English that directly answers/continues their topic.
+          3. If the user's sentence had grammatical errors or was written in ${userLanguage}, provide a corrected/natural English sentence in "corrected".
+          4. Provide the meaning in ${userLanguage} in "translation".
+          5. Provide a helpful grammar/learning note in ${userLanguage} in "explanation".
+
+          CRITICAL RULE:
+          - DO NOT output repetitive generic sentences like "I understood you! Let's continue practicing".
+          - "response" MUST BE A DYNAMIC, THOUGHTFUL ANSWER TO USER'S SPECIFIC STATEMENT ("${sentence}").
+
+          Return JSON strictly in this format:
           {
-            "corrected": "The natural English version of what the user wanted to say",
-            "response": "Your friendly conversational reply in English",
-            "translation": "The meaning of the user's input in ${userLanguage}",
-            "explanation": "A helpful explanation in ${userLanguage} about the English structure/translation"
+            "corrected": "Corrected English version or original if already correct",
+            "response": "Your thoughtful dynamic answer discussing ${sentence}",
+            "translation": "${userLanguage} translation of user's sentence",
+            "explanation": "Brief English grammar or vocabulary tip in ${userLanguage}"
           }`,
-          config: {
-            responseMimeType: "application/json",
-          }
+          config: { responseMimeType: "application/json" }
         });
 
-        const parsed = safeJsonParse(response.text);
-        if (!parsed || (!parsed.response && !parsed.corrected)) {
+        const text = response.text || "";
+        const parsed = safeJsonParse(text);
+
+        if (parsed && (parsed.response || parsed.corrected)) {
           return {
-            corrected: sentence,
-            response: response.text || "That sounds interesting! Tell me more.",
-            translation: sentence,
-            explanation: `Keep practicing in ${userLanguage}!`
+            corrected: parsed.corrected || sentence,
+            response: parsed.response || text,
+            translation: parsed.translation || sentence,
+            explanation: parsed.explanation || ""
           };
         }
-        return parsed;
+
+        // If JSON parse failed, use raw text directly as conversational response
+        return {
+          corrected: sentence,
+          response: text.trim() || `That's great! Let's talk more about ${sentence}.`,
+          translation: sentence,
+          explanation: ""
+        };
       });
     } catch (error) {
       console.error("Gemini Chat API Error:", error);
       return {
         corrected: sentence,
-        response: "I understood you! Let's continue practicing English together.",
+        response: `That sounds interesting! What specific details about ${sentence} would you like to discuss?`,
         translation: sentence,
-        explanation: "Keep practicing daily!"
+        explanation: ""
       };
     }
   }
