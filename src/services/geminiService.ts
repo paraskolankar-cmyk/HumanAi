@@ -91,27 +91,66 @@ export const getGeminiModel = (modelName = "gemini-2.5-flash") => {
 
 export const humanAiService = {
   async assessLevel(testAnswers: string) {
-    return withRetry(async (ai) => {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Assess the English level (Beginner, Intermediate, Advanced) based on these answers: ${testAnswers}. Return JSON with level and a brief explanation.`,
-        config: { responseMimeType: "application/json" }
+    try {
+      return await withRetry(async (ai) => {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Assess the English level (Beginner, Intermediate, Advanced) based on these answers: ${testAnswers}. Return JSON with level and a brief explanation.`,
+          config: { responseMimeType: "application/json" }
+        });
+        const parsed = safeJsonParse(response.text);
+        return parsed.level ? parsed : { level: "Intermediate", explanation: "Based on level assessment." };
       });
-      return safeJsonParse(response.text);
-    });
+    } catch (e) {
+      return { level: "Beginner", explanation: "Default starting level." };
+    }
   },
 
+  // FIXED 12-MONTH ROADMAP PLAN GENERATOR WITH GUARANTEED FALLBACK
   async generateLearningPlan(level: string) {
-    return withRetry(async (ai) => {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Create a 12-month high-level English learning roadmap for a ${level} level student. 
-        For each month, provide a theme and key learning objectives. 
-        Return JSON format: { roadmap: [ { month: 1, theme: "", objectives: [] }, ... ] }`,
-        config: { responseMimeType: "application/json" }
+    try {
+      return await withRetry(async (ai) => {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Create a 12-month high-level English learning roadmap for a ${level} level student. 
+          For each month (1 to 12), provide a theme and key learning objectives. 
+          Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... ] }`,
+          config: { responseMimeType: "application/json" }
+        });
+
+        const parsed = safeJsonParse(response.text);
+        if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
+          return parsed;
+        }
+        throw new Error("Invalid roadmap structure");
       });
-      return safeJsonParse(response.text);
-    });
+    } catch (error) {
+      console.error("Roadmap generation failed, serving fallback 12-month plan", error);
+
+      // GUARANTEED 12-MONTH FALLBACK ROADMAP FOR PRACTICE SECTION
+      const defaultThemes = [
+        { theme: "Foundations & Basics", objectives: ["Basic sentence formation", "Essential daily vocabulary", "Alphabet & Phonics rules"] },
+        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense usage", "Simple Past Tense usage", "Regular & Irregular verbs"] },
+        { theme: "Future Tense & Modals", objectives: ["Future Tense structure", "Modals (Can, Could, Should)", "Daily routine practice"] },
+        { theme: "Nouns, Pronouns & Adjectives", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives"] },
+        { theme: "Verbs & Sentence Patterns", objectives: ["Verb Forms (V1 to V4)", "Subject-Verb Agreement", "Sentence Transformations"] },
+        { theme: "Prepositions & Conjunctions", objectives: ["Prepositions of Place & Time", "Connecting Sentences", "Common Errors"] },
+        { theme: "Voice Transformation", objectives: ["Active Voice Rules", "Passive Voice Rules", "Conversations in Passive Voice"] },
+        { theme: "Direct & Indirect Narration", objectives: ["Direct Speech Rules", "Indirect Speech Conversion", "Reporting Verbs"] },
+        { theme: "Advanced Vocabulary & Idioms", objectives: ["High-frequency Idioms", "Phrasal Verbs", "Contextual Vocabulary"] },
+        { theme: "Reading & Error Spotting", objectives: ["Comprehension Practice", "Error Spotting Drills", "Sentence Rearrangement"] },
+        { theme: "Conversational Fluency", objectives: ["Speaking without Hesitation", "Public Speaking Basics", "Professional Emails"] },
+        { theme: "Mastery & Review", objectives: ["Advanced Grammar Inversion", "Complete Course Review", "Fluency Certification Practice"] }
+      ];
+
+      return {
+        roadmap: defaultThemes.map((item, index) => ({
+          month: index + 1,
+          theme: `${level} - ${item.theme}`,
+          objectives: item.objectives
+        }))
+      };
+    }
   },
 
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
@@ -228,54 +267,63 @@ export const humanAiService = {
     });
   },
 
-  // DYNAMIC & REAL-TIME AI CHAT RESPONSE FIX
-  async correctSentence(sentence: string, targetLanguage?: string) {
-    const userLanguage = targetLanguage || getSelectedLanguageName();
+  // HUMAN-LIKE CONVERSATIONAL CHAT RESPONSE (SUPPORT FOR POLYMORPHIC ARGS)
+  async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
+    let historyContext: string[] = [];
+    let userLanguage = getSelectedLanguageName();
+
+    if (Array.isArray(historyContextOrLang)) {
+      historyContext = historyContextOrLang;
+      if (targetLanguage) userLanguage = targetLanguage;
+    } else if (typeof historyContextOrLang === 'string') {
+      userLanguage = historyContextOrLang;
+    }
 
     try {
       return await withRetry(async (ai) => {
+        const historyPrompt = historyContext.length > 0 
+          ? `RECENT CHAT HISTORY FOR CONTEXT:\n${historyContext.join('\n')}\n` 
+          : '';
+
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `You are an empathetic, highly intelligent AI English Tutor named HumnAi.
-          The user sent this message in AI Chat: "${sentence}".
+          contents: `You are HumnAi, a warm, empathetic, witty, and human-like AI English Companion.
+          
+          ${historyPrompt}
+          CURRENT USER INPUT: "${sentence}"
 
-          YOUR GOAL:
-          1. Understand what the user wants to discuss or ask (e.g. machine learning, daily talk, grammar question, etc.).
-          2. Give a direct, naturally engaging, and helpful response in English that directly answers/continues their topic.
-          3. If the user's sentence had grammatical errors or was written in ${userLanguage}, provide a corrected/natural English sentence in "corrected".
-          4. Provide the meaning in ${userLanguage} in "translation".
-          5. Provide a helpful grammar/learning note in ${userLanguage} in "explanation".
-
-          CRITICAL RULE:
-          - DO NOT output repetitive generic sentences like "I understood you! Let's continue practicing".
-          - "response" MUST BE A DYNAMIC, THOUGHTFUL ANSWER TO USER'S SPECIFIC STATEMENT ("${sentence}").
+          HUMAN-LIKE CONVERSATION INSTRUCTIONS:
+          1. Act like a real, supportive human friend having a natural conversation.
+          2. Directly address, discuss, or answer the user's specific topic ("${sentence}").
+          3. Ask engaging follow-up questions to keep the natural flow of conversation going.
+          4. NEVER output generic or repetitive lines like "I understood you! Let's continue practicing".
+          5. If the user's message had grammatical mistakes or was in ${userLanguage}, provide the refined English sentence in "corrected" and a brief helpful tip in "explanation" in ${userLanguage}.
 
           Return JSON strictly in this format:
           {
-            "corrected": "Corrected English version or original if already correct",
-            "response": "Your thoughtful dynamic answer discussing ${sentence}",
-            "translation": "${userLanguage} translation of user's sentence",
+            "corrected": "Refined English sentence or original if correct",
+            "response": "Your thoughtful, natural, human-like dynamic answer discussing '${sentence}'",
+            "translation": "${userLanguage} translation of user sentence",
             "explanation": "Brief English grammar or vocabulary tip in ${userLanguage}"
           }`,
           config: { responseMimeType: "application/json" }
         });
 
-        const text = response.text || "";
-        const parsed = safeJsonParse(text);
+        const rawText = response.text || "";
+        const parsed = safeJsonParse(rawText);
 
         if (parsed && (parsed.response || parsed.corrected)) {
           return {
             corrected: parsed.corrected || sentence,
-            response: parsed.response || text,
+            response: parsed.response || rawText.trim(),
             translation: parsed.translation || sentence,
             explanation: parsed.explanation || ""
           };
         }
 
-        // If JSON parse failed, use raw text directly as conversational response
         return {
           corrected: sentence,
-          response: text.trim() || `That's great! Let's talk more about ${sentence}.`,
+          response: rawText.trim() || `That's really interesting! What else would you like to discuss about "${sentence}"?`,
           translation: sentence,
           explanation: ""
         };
@@ -284,7 +332,7 @@ export const humanAiService = {
       console.error("Gemini Chat API Error:", error);
       return {
         corrected: sentence,
-        response: `That sounds interesting! What specific details about ${sentence} would you like to discuss?`,
+        response: `That sounds fascinating! Tell me more about what you think regarding "${sentence}".`,
         translation: sentence,
         explanation: ""
       };
