@@ -64,23 +64,28 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// DIRECT REST API EXECUTOR (Prevents SDK 404/Bundler Errors on Vercel)
+// DIRECT REST API EXECUTOR (FAIL-SAFE FOR VERCEL & VITE)
 async function callGeminiRestApi(prompt: string, forceJson = true): Promise<string> {
   const keys = getApiKeyList();
   if (keys.length === 0) {
-    console.error("❌ CRITICAL: No Gemini API Keys found in Environment Variables!");
+    console.error("❌ CRITICAL: No Gemini API Key found in Environment Variables!");
     throw new Error("Missing Gemini API Key");
   }
 
   let lastError: any = null;
 
+  // Try across available keys and backup models
   for (let attempt = 0; attempt < keys.length * 2; attempt++) {
     const activeKey = keys[currentKeyIndex] || keys[0];
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`;
 
+    const systemInstruction = forceJson 
+      ? "\n\nIMPORTANT: You must respond ONLY with a valid raw JSON object. Do not wrap in markdown or markdown codeblocks if possible."
+      : "";
+
     const requestBody: any = {
       contents: [{
-        parts: [{ text: prompt }]
+        parts: [{ text: prompt + systemInstruction }]
       }]
     };
 
@@ -106,13 +111,10 @@ async function callGeminiRestApi(prompt: string, forceJson = true): Promise<stri
       }
 
       const errText = await response.text();
-      console.warn(`Gemini API Call attempt failed (${response.status}):`, errText);
+      console.warn(`Gemini API Call attempt ${attempt + 1} failed (${response.status}):`, errText);
 
-      if (response.status === 429 || response.status === 403 || errText.includes("Quota") || errText.includes("API key")) {
-        rotateKey();
-        await new Promise(res => setTimeout(res, 1000));
-        continue;
-      }
+      rotateKey();
+      await new Promise(res => setTimeout(res, 1000));
     } catch (err) {
       lastError = err;
       rotateKey();
@@ -192,7 +194,7 @@ export const humanAiService = {
       const parsed = safeJsonParse(rawText);
       const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
       
-      if (parsed && total >= 5) {
+      if (parsed && total >= 1) {
         return parsed;
       }
       throw new Error("Tasks count below minimum");
@@ -254,21 +256,20 @@ export const humanAiService = {
 
       const seed = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
 
-      const prompt = `You are HumnAi, a warm, witty, genuine human friend and English language tutor chatting with a friend on WhatsApp.
+      const prompt = `You are HumnAi, a warm, witty, genuine human friend and English tutor chatting on WhatsApp.
       Session Seed: ${seed}
 
       ${historyPrompt}
-      USER'S INPUT SENTENCE: "${cleanInput}"
+      USER'S INPUT MESSAGE: "${cleanInput}"
 
       STRICT HUMANOID & TUTORING INSTRUCTIONS:
       1. CRITICAL GRAMMAR & PHRASING EVALUATION:
-         - Carefully check "${cleanInput}" for grammar mistakes, unnatural phrasing, missing words, or if the user spoke in ${userLanguage}.
-         - "corrected": Always provide the most natural, polished, native-sounding English sentence. (e.g., if user says "I want to talk with you can you please talk with me", correct it to "I want to talk with you. Could you please chat with me for a couple of minutes?")
-         - "explanation": Explain clearly and warmly in ${userLanguage} what mistake was made and why the corrected version sounds more natural.
-         - If user sentence is ALREADY 100% perfect, set "corrected" to original text and "explanation" to "".
-      2. FRIENDLY CONVERSATIONAL RESPONSE:
-         - "response": Write a warm, casual, human reply in English naturally continuing the conversation like a real WhatsApp friend.
-         - NEVER use robotic lines like "What would you like to know about this?" or "Tell me more about X".
+         - Carefully evaluate "${cleanInput}" for grammar mistakes, missing prepositions, word order issues, or native language (${userLanguage}) influence.
+         - "corrected": Provide a polished, natural, native-sounding English sentence. (Example: if user says "I want to talk with you can you please talk with me", correct it to "I want to talk with you. Could you please speak with me for a couple of minutes?")
+         - "explanation": Write a clear, encouraging explanation in ${userLanguage} describing what mistake was made and why the corrected version sounds more natural.
+         - If the input is ALREADY 100% grammatically correct, perfect English: set "corrected" to original input and "explanation" to "".
+      2. FRIENDLY HUMAN RESPONSE:
+         - "response": Write a warm, casual, human reply in English naturally continuing the conversation like a real WhatsApp friend. Do NOT sound like a bot.
 
       Return JSON strictly in this exact format:
       {
