@@ -51,7 +51,7 @@ function getAiInstance(): GoogleGenAI {
   const apiKey = keys[currentKeyIndex] || keys[0] || "";
   
   if (!apiKey) {
-    console.error("❌ GEMINI API KEY MISSING: No API Key found in Environment Variables.");
+    console.error("❌ GEMINI API KEY MISSING: Check VITE_PRIMARY_GEMINI_KEY in Environment Variables.");
   }
 
   return new GoogleGenAI({ apiKey });
@@ -110,10 +110,10 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-const PRIMARY_MODEL = "gemini-2.5-flash";
-const FALLBACK_MODEL = "gemini-1.5-flash";
+// OFFICIAL VALID MODEL NAME (Eliminates 404 Not Found error)
+const VALID_MODEL = "gemini-1.5-flash";
 
-export const getGeminiModel = (modelName = PRIMARY_MODEL) => {
+export const getGeminiModel = (modelName = VALID_MODEL) => {
   const ai = getAiInstance();
   return ai.models.generateContent({
     model: modelName,
@@ -127,20 +127,11 @@ export const humanAiService = {
     const formattedAnswers = Array.isArray(testAnswers) ? testAnswers.join(', ') : testAnswers;
     try {
       return await withRetry(async (ai) => {
-        let response;
-        try {
-          response = await ai.models.generateContent({
-            model: PRIMARY_MODEL,
-            contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
-            config: { responseMimeType: "application/json" }
-          });
-        } catch (e) {
-          response = await ai.models.generateContent({
-            model: FALLBACK_MODEL,
-            contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
-            config: { responseMimeType: "application/json" }
-          });
-        }
+        const response = await ai.models.generateContent({
+          model: VALID_MODEL,
+          contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
+          config: { responseMimeType: "application/json" }
+        });
         const parsed = safeJsonParse(response.text);
         return parsed.level ? parsed : { level: "Intermediate", explanation: "Evaluated from assessment test." };
       });
@@ -153,24 +144,13 @@ export const humanAiService = {
   async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
       return await withRetry(async (ai) => {
-        let response;
-        try {
-          response = await ai.models.generateContent({
-            model: PRIMARY_MODEL,
-            contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
-            Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
-            Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
-            config: { responseMimeType: "application/json" }
-          });
-        } catch (e) {
-          response = await ai.models.generateContent({
-            model: FALLBACK_MODEL,
-            contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
-            Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
-            Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
-            config: { responseMimeType: "application/json" }
-          });
-        }
+        const response = await ai.models.generateContent({
+          model: VALID_MODEL,
+          contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
+          Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
+          Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
+          config: { responseMimeType: "application/json" }
+        });
 
         const parsed = safeJsonParse(response.text);
         if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
@@ -212,7 +192,6 @@ export const humanAiService = {
 
     try {
       return await withRetry(async (ai) => {
-        let response;
         const taskPrompt = `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
           CRITICAL CONSTRAINT: Generate BETWEEN 20 AND 30 PRACTICE QUESTIONS IN TOTAL (MINIMUM 20, MAXIMUM 30).
           
@@ -238,19 +217,11 @@ export const humanAiService = {
             ]
           }`;
 
-        try {
-          response = await ai.models.generateContent({
-            model: PRIMARY_MODEL,
-            contents: taskPrompt,
-            config: { responseMimeType: "application/json" }
-          });
-        } catch (e) {
-          response = await ai.models.generateContent({
-            model: FALLBACK_MODEL,
-            contents: taskPrompt,
-            config: { responseMimeType: "application/json" }
-          });
-        }
+        const response = await ai.models.generateContent({
+          model: VALID_MODEL,
+          contents: taskPrompt,
+          config: { responseMimeType: "application/json" }
+        });
 
         const parsed = safeJsonParse(response.text);
         const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
@@ -314,22 +285,13 @@ export const humanAiService = {
     }
 
     return withRetry(async (ai) => {
-      let response;
       const contentPrompt = `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`;
       
-      try {
-        response = await ai.models.generateContent({
-          model: PRIMARY_MODEL,
-          contents: contentPrompt,
-          config: { responseMimeType: "application/json" }
-        });
-      } catch (e) {
-        response = await ai.models.generateContent({
-          model: FALLBACK_MODEL,
-          contents: contentPrompt,
-          config: { responseMimeType: "application/json" }
-        });
-      }
+      const response = await ai.models.generateContent({
+        model: VALID_MODEL,
+        contents: contentPrompt,
+        config: { responseMimeType: "application/json" }
+      });
 
       const parsed = safeJsonParse(response.text);
       if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
@@ -388,20 +350,11 @@ export const humanAiService = {
           "explanation": "Mistake explanation in ${userLanguage} or empty string"
         }`;
 
-        let response;
-        try {
-          response = await ai.models.generateContent({
-            model: PRIMARY_MODEL,
-            contents: prompt,
-            config: { responseMimeType: "application/json" }
-          });
-        } catch (e) {
-          response = await ai.models.generateContent({
-            model: FALLBACK_MODEL,
-            contents: prompt,
-            config: { responseMimeType: "application/json" }
-          });
-        }
+        const response = await ai.models.generateContent({
+          model: VALID_MODEL,
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+        });
 
         const rawText = response.text || "";
         const parsed = safeJsonParse(rawText);
