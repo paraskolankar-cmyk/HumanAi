@@ -89,7 +89,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 1. LOAD CHAT HISTORY WITH 24-HOUR EXPIRATION FILTER
+  // LOAD CHAT HISTORY
   useEffect(() => {
     const email = userEmail || localStorage.getItem('humnai_user_email');
     const storageKey = `humnai_chat_${email || 'guest'}`;
@@ -153,7 +153,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     scrollToBottom();
   }, [messages]);
 
-  // Persist messages to LocalStorage
   const persistMessages = (updatedMessages: Message[]) => {
     setMessages(updatedMessages);
 
@@ -166,7 +165,6 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     }));
   };
 
-  // Clear Chat History
   const clearChatHistory = () => {
     if (confirm("Are you sure you want to clear your conversation history?")) {
       const defaultMsg: Message[] = [DEFAULT_WELCOME_MESSAGE];
@@ -323,7 +321,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
       const aiResponseText = correctionData.response || "That sounds really interesting!";
       
-      const isCorrectionNeeded = correctionData.corrected && correctionData.corrected.trim().toLowerCase() !== transcript.trim().toLowerCase();
+      const cleanOriginal = transcript.trim().toLowerCase();
+      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase();
+      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -331,7 +331,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         text: aiResponseText,
         correction: isCorrectionNeeded ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation || undefined,
+        explanation: (isCorrectionNeeded || correctionData.explanation) ? correctionData.explanation : undefined,
         timestamp: Date.now()
       };
 
@@ -394,7 +394,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
       const aiResponseText = correctionData.response || "That's really cool!";
       
-      const isCorrectionNeeded = correctionData.corrected && correctionData.corrected.trim().toLowerCase() !== formattedInput.trim().toLowerCase();
+      const cleanOriginal = formattedInput.trim().toLowerCase();
+      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase();
+      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -402,7 +404,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         text: aiResponseText,
         correction: isCorrectionNeeded ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation || undefined,
+        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
         timestamp: Date.now()
       };
 
