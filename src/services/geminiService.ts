@@ -211,10 +211,12 @@ export const humanAiService = {
         const parsed = safeJsonParse(response.text);
         const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
         
-        if (parsed && total >= 15) {
+        if (parsed && total >= 20 && total <= 30) {
+          return parsed;
+        } else if (parsed && total >= 15) {
           return parsed;
         }
-        throw new Error("Tasks count below required minimum");
+        throw new Error("Tasks count outside valid range");
       });
     } catch (error) {
       console.error("Daily Tasks Generation Error. Serving 24 Fallback Tasks.", error);
@@ -264,9 +266,7 @@ export const humanAiService = {
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          if (parsed && (parsed.vocabulary || parsed.explanation || parsed.topic)) {
-            return parsed;
-          }
+          if (parsed && (parsed.vocabulary || parsed.explanation || parsed.topic)) return parsed;
         } catch (e) {}
       }
     }
@@ -274,41 +274,18 @@ export const humanAiService = {
     return withRetry(async (ai) => {
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level.
-
-        REQUIREMENTS BY CATEGORY:
-        1. Topic: Create a Day ${dayNumber} specific topic title.
-        2. Content & Explanation: Provide a detailed explanation in English AND a complete translation in ${userLanguage}.
-        
-        3. Vocabulary Specific (If category is "Vocabulary" or "Synonyms & Antonyms"):
-           - Provide Words/Pairs with English Word, Meaning, ${userLanguage} Translation, and Example sentence.
-
-        4. Verbs Specific (If category is "Verbs"):
-           - Provide Verbs with v1, v2, v3, v4, ${userLanguage} translation, and example sentence.
-
-        5. Noun, Pronoun, Voice, Narration, Tenses & Grammar Specific:
-           - Provide 3-5 Important Grammar Rules in "rules", formula in "tenseStructure", and Example Sentences.
-
-        6. Practice Questions:
-           - Provide 5 MCQs with Question Text, Translation in ${userLanguage}, 4 Options, Correct Answer, and Explanation.
-
-        Return JSON format.`,
+        contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`,
         config: { responseMimeType: "application/json" }
       });
-
       const parsed = safeJsonParse(response.text);
-
       if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(parsed));
-        } catch (e) {}
+        try { localStorage.setItem(cacheKey, JSON.stringify(parsed)); } catch (e) {}
       }
-
       return parsed;
     });
   },
 
-  // HUMAN-LIKE CONVERSATIONAL CHAT RESPONSE (SUPPORT FOR POLYMORPHIC ARGS)
+  // REAL HUMAN-LIKE CONVERSATIONAL CHAT WITH NATIVE MISTAKE EXPLANATION
   async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
     let historyContext: string[] = [];
     let userLanguage = getSelectedLanguageName();
@@ -323,29 +300,33 @@ export const humanAiService = {
     try {
       return await withRetry(async (ai) => {
         const historyPrompt = historyContext.length > 0 
-          ? `RECENT CHAT HISTORY FOR CONTEXT:\n${historyContext.join('\n')}\n` 
+          ? `RECENT CHAT HISTORY:\n${historyContext.join('\n')}\n` 
           : '';
 
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `You are HumnAi, a warm, empathetic, witty, and human-like AI English Companion.
-          
-          ${historyPrompt}
-          CURRENT USER INPUT: "${sentence}"
+          contents: `You are HumnAi, a real human friend and fluent English companion chatting casually.
 
-          HUMAN-LIKE CONVERSATION INSTRUCTIONS:
-          1. Act like a real, supportive human friend having a natural conversation.
-          2. Directly address, discuss, or answer the user's specific topic ("${sentence}").
-          3. Ask engaging follow-up questions to keep the natural flow of conversation going.
-          4. NEVER output generic or repetitive lines like "I understood you! Let's continue practicing".
-          5. If the user's message had grammatical mistakes or was in ${userLanguage}, provide the refined English sentence in "corrected" and a brief helpful tip in "explanation" in ${userLanguage}.
+          ${historyPrompt}
+          USER INPUT: "${sentence}"
+
+          STRICT CONVERSATIONAL INSTRUCTIONS:
+          1. DO NOT sound like a robotic AI or English tutor asking generic questions like "What do you want to know about this?" or "Tell me more about X".
+          2. Reply naturally like a supportive human friend on WhatsApp or in real life. Share your own thoughts/ideas first, then naturally continue the conversation.
+          3. Evaluate what the user said. If they made a grammar/spelling mistake or spoke in ${userLanguage}:
+             - "corrected": Provide the most natural, native-sounding English version.
+             - "explanation": Explain clearly in ${userLanguage} what mistake was made and how to fix it (e.g. in simple ${userLanguage}).
+          4. If the user's sentence is already grammatically correct:
+             - "corrected": Keep the original sentence or offer a natural alternative.
+             - "explanation": Leave empty "".
+          5. "response": Your engaging, empathetic, human conversational reply in English.
 
           Return JSON strictly in this format:
           {
-            "corrected": "Refined English sentence or original if correct",
-            "response": "Your thoughtful, natural, human-like dynamic answer discussing '${sentence}'",
+            "corrected": "Refined English sentence",
+            "response": "Your friendly, natural human conversational reply",
             "translation": "${userLanguage} translation of user sentence",
-            "explanation": "Brief English grammar or vocabulary tip in ${userLanguage}"
+            "explanation": "Clear explanation of grammar/spelling mistake in ${userLanguage} (or empty string if correct)"
           }`,
           config: { responseMimeType: "application/json" }
         });
@@ -364,7 +345,7 @@ export const humanAiService = {
 
         return {
           corrected: sentence,
-          response: rawText.trim() || `That's really interesting! What else would you like to discuss about "${sentence}"?`,
+          response: rawText.trim() || `That's pretty cool! I was actually thinking about something similar today. How did you get interested in it?`,
           translation: sentence,
           explanation: ""
         };
@@ -373,7 +354,7 @@ export const humanAiService = {
       console.error("Gemini Chat API Error:", error);
       return {
         corrected: sentence,
-        response: `That sounds fascinating! Tell me more about what you think regarding "${sentence}".`,
+        response: `Oh nice! That sounds like fun. How long have you been doing that?`,
         translation: sentence,
         explanation: ""
       };
