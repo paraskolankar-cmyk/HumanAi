@@ -16,10 +16,11 @@ export function getSelectedLanguageName(): string {
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
-// 2. Safely extract API Keys from both Vite (Client) and Process (Server)
+// 2. Safely extract API Keys from both Vite (Client import.meta.env) and Process (Server process.env)
 function getApiKeyList(): string[] {
   const keys: (string | undefined)[] = [];
 
+  // Vite Client-side Environment
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       keys.push(import.meta.env.VITE_PRIMARY_GEMINI_KEY);
@@ -28,6 +29,7 @@ function getApiKeyList(): string[] {
     }
   } catch (e) {}
 
+  // Process / Node Environment Fallback
   try {
     if (typeof process !== 'undefined' && process.env) {
       keys.push(process.env.VITE_PRIMARY_GEMINI_KEY);
@@ -45,6 +47,11 @@ let currentKeyIndex = 0;
 function getAiInstance(): GoogleGenAI {
   const keys = getApiKeyList();
   const apiKey = keys[currentKeyIndex] || keys[0] || "";
+  
+  if (!apiKey) {
+    console.warn("⚠️ API Key Warning: No Gemini API Key found in Environment Variables.");
+  }
+
   return new GoogleGenAI({ apiKey });
 }
 
@@ -100,7 +107,10 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-export const getGeminiModel = (modelName = "gemini-2.5-flash") => {
+// FIX: Standard Google Gemini Flash Model Name
+const GEMINI_MODEL = "gemini-1.5-flash";
+
+export const getGeminiModel = (modelName = GEMINI_MODEL) => {
   const ai = getAiInstance();
   return ai.models.generateContent({
     model: modelName,
@@ -115,7 +125,7 @@ export const humanAiService = {
     try {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
           config: { responseMimeType: "application/json" }
         });
@@ -132,7 +142,7 @@ export const humanAiService = {
     try {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
           Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
           Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
@@ -180,7 +190,7 @@ export const humanAiService = {
     try {
       return await withRetry(async (ai) => {
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           contents: `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
           CRITICAL CONSTRAINT: Generate BETWEEN 20 AND 30 PRACTICE QUESTIONS IN TOTAL (MINIMUM 20, MAXIMUM 30).
           
@@ -291,7 +301,7 @@ export const humanAiService = {
 
     return withRetry(async (ai) => {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: GEMINI_MODEL,
         contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`,
         config: { responseMimeType: "application/json" }
       });
@@ -316,8 +326,6 @@ export const humanAiService = {
     }
 
     const cleanInput = (sentence || "").trim();
-
-    // Direct local handling for simple greetings so it responds instantly
     const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
 
     try {
@@ -356,7 +364,7 @@ export const humanAiService = {
         }`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -383,15 +391,15 @@ export const humanAiService = {
           corrected: cleanInput,
           response: "Hey there! Great to connect with you. How's your day going so far?",
           translation: cleanInput,
-          explanation: "" // Clean empty string so yellow error box disappears completely!
+          explanation: ""
         };
       }
 
       return {
         corrected: cleanInput,
-        response: `Hey! Thanks for sharing. How has everything else been going with you today?`,
+        response: `Hey! Thanks for chatting. I'm right here—what else is on your mind today?`,
         translation: cleanInput,
-        explanation: "" // Clean empty string so yellow error box disappears completely!
+        explanation: ""
       };
     }
   }
