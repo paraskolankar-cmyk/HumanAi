@@ -16,36 +16,63 @@ export function getSelectedLanguageName(): string {
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
-// 2. Primary aur Backup API Keys ka array
-const GEMINI_KEYS = [
-  process.env.GEMINI_API_KEY,
-  process.env.VITE_PRIMARY_GEMINI_KEY,
-  process.env.VITE_BACKUP_GEMINI_KEY
-].filter((key): key is string => Boolean(key) && key.trim().length > 0);
+// FIX: Client side Vite (import.meta.env) aur Server side (process.env) dono se API keys safely get karna
+function getApiKeyList(): string[] {
+  const keys: (string | undefined)[] = [];
+
+  // Vite Client side Environment Variables
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      keys.push(import.meta.env.VITE_PRIMARY_GEMINI_KEY);
+      keys.push(import.meta.env.VITE_BACKUP_GEMINI_KEY);
+      keys.push(import.meta.env.GEMINI_API_KEY);
+    }
+  } catch (e) {}
+
+  // Node / Server Environment Variables
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      keys.push(process.env.GEMINI_API_KEY);
+      keys.push(process.env.VITE_PRIMARY_GEMINI_KEY);
+      keys.push(process.env.VITE_BACKUP_GEMINI_KEY);
+    }
+  } catch (e) {}
+
+  return Array.from(new Set(keys.filter((key): key is string => Boolean(key) && typeof key === 'string' && key.trim().length > 0)));
+}
 
 let currentKeyIndex = 0;
 
 // Current Active SDK Instance Helper
 function getAiInstance(): GoogleGenAI {
-  const apiKey = GEMINI_KEYS[currentKeyIndex] || process.env.GEMINI_API_KEY || process.env.VITE_PRIMARY_GEMINI_KEY || "";
+  const keys = getApiKeyList();
+  const apiKey = keys[currentKeyIndex] || keys[0] || "";
+  
+  if (!apiKey) {
+    console.warn("⚠️ API Key Warning: No Gemini API Key found in Environment Variables (VITE_PRIMARY_GEMINI_KEY).");
+  }
+  
   return new GoogleGenAI({ apiKey });
 }
 
 // Limit Exceed Hone Par Next Backup Key Par Switch Karne Ka Logic
 function rotateToBackupKey(): void {
-  if (GEMINI_KEYS.length <= 1) return;
+  const keys = getApiKeyList();
+  if (keys.length <= 1) return;
   const prevIndex = currentKeyIndex;
-  currentKeyIndex = (currentKeyIndex + 1) % GEMINI_KEYS.length;
+  currentKeyIndex = (currentKeyIndex + 1) % keys.length;
   console.warn(
     `⚠️ Primary API Limit Exceeded (Key #${prevIndex + 1}). Switched to Backup Key #${currentKeyIndex + 1}`
   );
 }
 
 // Automatic Retry & Backup Switch Wrapper
-async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GEMINI_KEYS.length || 3): Promise<T> {
+async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: any;
+  const keys = getApiKeyList();
+  const totalAttempts = Math.max(maxRetries, keys.length || 1);
   
-  for (let i = 0; i < maxRetries; i++) {
+  for (let i = 0; i < totalAttempts; i++) {
     try {
       const activeAi = getAiInstance();
       return await fn(activeAi);
@@ -53,7 +80,7 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = GE
       lastError = error;
       const errorMessage = error?.message || String(error);
       
-      if (errorMessage.includes("429") || errorMessage.includes("Rate exceeded") || errorMessage.includes("Quota")) {
+      if (errorMessage.includes("429") || errorMessage.includes("Rate exceeded") || errorMessage.includes("Quota") || errorMessage.includes("API key")) {
         rotateToBackupKey();
         const delay = Math.pow(2, i) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -298,27 +325,28 @@ export const humanAiService = {
     try {
       return await withRetry(async (ai) => {
         const historyPrompt = historyContext.length > 0 
-          ? `RECENT CHAT HISTORY:\n${historyContext.join('\n')}\n` 
+          ? `PREVIOUS CHAT MESSAGES:\n${historyContext.join('\n')}\n` 
           : '';
 
-        const nonce = Date.now() + Math.random().toString(36).substring(2, 7);
+        const seed = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
 
-        const prompt = `You are HumnAi, a genuine, warm, witty, human friend chatting in English with a friend on WhatsApp.
-        Session ID: ${nonce}
+        const prompt = `You are HumnAi, a warm, witty, genuine human friend chatting in English with a friend on WhatsApp.
+        Session Seed: ${seed}
 
         ${historyPrompt}
         USER MESSAGE: "${sentence}"
 
-        STRICT HUMANOID INSTRUCTIONS:
-        1. NEVER output robotic clichés or teacher-like questions such as "What would you like to know about this?", "Tell me more about X", "How can I assist you?", or "That's interesting! What specific details...".
-        2. REACT LIKE A REAL HUMAN: Share a personal opinion, anecdote, or natural friendly reaction to "${sentence}" first, then ask a natural follow-up question to keep the conversation going smoothly.
-        3. EVALUATE MISTAKES:
-           - If the user made a grammar/spelling mistake or spoke in ${userLanguage}:
-             * "corrected": Provide the most natural, idiomatic English sentence.
-             * "explanation": Explain clearly in ${userLanguage} what mistake was made and how to correct it.
-           - If the sentence is already correct English:
-             * "corrected": Keep the original sentence or a stylish native phrasing.
+        STRICT HUMANOID & EVALUATION INSTRUCTIONS:
+        1. NEVER SOUND LIKE A BOT OR TUTOR: Do NOT ask generic template questions like "What do you want to know about this?", "Tell me more about X", "How can I assist you?", or "That's interesting! What details...".
+        2. REACT LIKE A REAL HUMAN FRIEND: Directly answer or share your genuine thoughts, personal reaction, or opinion about "${sentence}" first, then ask a natural follow-up question to keep the chat going smoothly.
+        3. MISTAKE & GRAMMAR EVALUATION:
+           - If the user made a grammar/spelling mistake OR spoke in ${userLanguage}:
+             * "corrected": Provide the most natural, idiomatic, correct English sentence.
+             * "explanation": Explain clearly in ${userLanguage} what mistake was made and how to fix it (e.g., in simple ${userLanguage}).
+           - If the sentence is ALREADY grammatically correct English:
+             * "corrected": Keep the original sentence or offer a natural alternative.
              * "explanation": Return empty string "".
+        4. "response": Your engaging, empathetic, natural human reply in English specifically addressing "${sentence}".
 
         Return JSON strictly in this format:
         {
@@ -348,18 +376,27 @@ export const humanAiService = {
 
         return {
           corrected: sentence,
-          response: rawText.trim() || `Oh cool! I was actually thinking about something similar today. How did that turn out for you?`,
+          response: rawText.trim() || `Hey, that's pretty cool! I was actually thinking about something similar today. How did that go for you?`,
           translation: sentence,
           explanation: ""
         };
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Gemini Chat API Error:", error);
+      
+      // Dynamic fallback based on the input text so it NEVER repeats a single hardcoded sentence
+      const fallbackReplies = [
+        `Hey! I noticed you mentioned "${sentence}". That's interesting! What happened next?`,
+        `Oh cool! "${sentence}" sounds pretty awesome. How long have you been doing that?`,
+        `I hear you! Speaking of "${sentence}", how has your day been going otherwise?`
+      ];
+      const randomReply = fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)];
+
       return {
         corrected: sentence,
-        response: `Oh nice! That sounds pretty cool. How long have you been into that?`,
+        response: randomReply,
         translation: sentence,
-        explanation: ""
+        explanation: "Note: Please check VITE_PRIMARY_GEMINI_KEY in Vercel settings if this repeats."
       };
     }
   }
