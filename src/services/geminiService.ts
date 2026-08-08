@@ -211,12 +211,10 @@ export const humanAiService = {
         const parsed = safeJsonParse(response.text);
         const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
         
-        if (parsed && total >= 20 && total <= 30) {
-          return parsed;
-        } else if (parsed && total >= 15) {
+        if (parsed && total >= 15) {
           return parsed;
         }
-        throw new Error("Tasks count outside valid range");
+        throw new Error("Tasks count below required minimum");
       });
     } catch (error) {
       console.error("Daily Tasks Generation Error. Serving 24 Fallback Tasks.", error);
@@ -303,31 +301,36 @@ export const humanAiService = {
           ? `RECENT CHAT HISTORY:\n${historyContext.join('\n')}\n` 
           : '';
 
+        const nonce = Date.now() + Math.random().toString(36).substring(2, 7);
+
+        const prompt = `You are HumnAi, a genuine, warm, witty, human friend chatting in English with a friend on WhatsApp.
+        Session ID: ${nonce}
+
+        ${historyPrompt}
+        USER MESSAGE: "${sentence}"
+
+        STRICT HUMANOID INSTRUCTIONS:
+        1. NEVER output robotic clichés or teacher-like questions such as "What would you like to know about this?", "Tell me more about X", "How can I assist you?", or "That's interesting! What specific details...".
+        2. REACT LIKE A REAL HUMAN: Share a personal opinion, anecdote, or natural friendly reaction to "${sentence}" first, then ask a natural follow-up question to keep the conversation going smoothly.
+        3. EVALUATE MISTAKES:
+           - If the user made a grammar/spelling mistake or spoke in ${userLanguage}:
+             * "corrected": Provide the most natural, idiomatic English sentence.
+             * "explanation": Explain clearly in ${userLanguage} what mistake was made and how to correct it.
+           - If the sentence is already correct English:
+             * "corrected": Keep the original sentence or a stylish native phrasing.
+             * "explanation": Return empty string "".
+
+        Return JSON strictly in this format:
+        {
+          "corrected": "Natural English sentence",
+          "response": "Your friendly, casual human conversational reply in English",
+          "translation": "${userLanguage} translation of user sentence",
+          "explanation": "Mistake explanation in ${userLanguage} or empty string"
+        }`;
+
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: `You are HumnAi, a real human friend and fluent English companion chatting casually.
-
-          ${historyPrompt}
-          USER INPUT: "${sentence}"
-
-          STRICT CONVERSATIONAL INSTRUCTIONS:
-          1. DO NOT sound like a robotic AI or English tutor asking generic questions like "What do you want to know about this?" or "Tell me more about X".
-          2. Reply naturally like a supportive human friend on WhatsApp or in real life. Share your own thoughts/ideas first, then naturally continue the conversation.
-          3. Evaluate what the user said. If they made a grammar/spelling mistake or spoke in ${userLanguage}:
-             - "corrected": Provide the most natural, native-sounding English version.
-             - "explanation": Explain clearly in ${userLanguage} what mistake was made and how to fix it (e.g. in simple ${userLanguage}).
-          4. If the user's sentence is already grammatically correct:
-             - "corrected": Keep the original sentence or offer a natural alternative.
-             - "explanation": Leave empty "".
-          5. "response": Your engaging, empathetic, human conversational reply in English.
-
-          Return JSON strictly in this format:
-          {
-            "corrected": "Refined English sentence",
-            "response": "Your friendly, natural human conversational reply",
-            "translation": "${userLanguage} translation of user sentence",
-            "explanation": "Clear explanation of grammar/spelling mistake in ${userLanguage} (or empty string if correct)"
-          }`,
+          contents: prompt,
           config: { responseMimeType: "application/json" }
         });
 
@@ -345,7 +348,7 @@ export const humanAiService = {
 
         return {
           corrected: sentence,
-          response: rawText.trim() || `That's pretty cool! I was actually thinking about something similar today. How did you get interested in it?`,
+          response: rawText.trim() || `Oh cool! I was actually thinking about something similar today. How did that turn out for you?`,
           translation: sentence,
           explanation: ""
         };
@@ -354,7 +357,7 @@ export const humanAiService = {
       console.error("Gemini Chat API Error:", error);
       return {
         corrected: sentence,
-        response: `Oh nice! That sounds like fun. How long have you been doing that?`,
+        response: `Oh nice! That sounds pretty cool. How long have you been into that?`,
         translation: sentence,
         explanation: ""
       };
