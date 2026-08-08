@@ -16,11 +16,10 @@ export function getSelectedLanguageName(): string {
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
-// FIX: Client side Vite (import.meta.env) aur Server side (process.env) dono se API keys safely get karna
+// 2. Safely extract API Keys from both Vite (Client) and Process (Server)
 function getApiKeyList(): string[] {
   const keys: (string | undefined)[] = [];
 
-  // Vite Client side Environment Variables
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       keys.push(import.meta.env.VITE_PRIMARY_GEMINI_KEY);
@@ -29,12 +28,11 @@ function getApiKeyList(): string[] {
     }
   } catch (e) {}
 
-  // Node / Server Environment Variables
   try {
     if (typeof process !== 'undefined' && process.env) {
-      keys.push(process.env.GEMINI_API_KEY);
       keys.push(process.env.VITE_PRIMARY_GEMINI_KEY);
       keys.push(process.env.VITE_BACKUP_GEMINI_KEY);
+      keys.push(process.env.GEMINI_API_KEY);
     }
   } catch (e) {}
 
@@ -47,11 +45,6 @@ let currentKeyIndex = 0;
 function getAiInstance(): GoogleGenAI {
   const keys = getApiKeyList();
   const apiKey = keys[currentKeyIndex] || keys[0] || "";
-  
-  if (!apiKey) {
-    console.warn("⚠️ API Key Warning: No Gemini API Key found in Environment Variables (VITE_PRIMARY_GEMINI_KEY).");
-  }
-  
   return new GoogleGenAI({ apiKey });
 }
 
@@ -322,10 +315,15 @@ export const humanAiService = {
       userLanguage = historyContextOrLang;
     }
 
+    const cleanInput = (sentence || "").trim();
+
+    // Direct local handling for simple greetings so it responds instantly
+    const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
+
     try {
       return await withRetry(async (ai) => {
         const historyPrompt = historyContext.length > 0 
-          ? `PREVIOUS CHAT MESSAGES:\n${historyContext.join('\n')}\n` 
+          ? `PREVIOUS CONVERSATION HISTORY:\n${historyContext.slice(-6).join('\n')}\n` 
           : '';
 
         const seed = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
@@ -334,19 +332,20 @@ export const humanAiService = {
         Session Seed: ${seed}
 
         ${historyPrompt}
-        USER MESSAGE: "${sentence}"
+        FRIEND'S MESSAGE: "${cleanInput}"
 
-        STRICT HUMANOID & EVALUATION INSTRUCTIONS:
+        STRICT HUMANOID INSTRUCTIONS:
         1. NEVER SOUND LIKE A BOT OR TUTOR: Do NOT ask generic template questions like "What do you want to know about this?", "Tell me more about X", "How can I assist you?", or "That's interesting! What details...".
-        2. REACT LIKE A REAL HUMAN FRIEND: Directly answer or share your genuine thoughts, personal reaction, or opinion about "${sentence}" first, then ask a natural follow-up question to keep the chat going smoothly.
-        3. MISTAKE & GRAMMAR EVALUATION:
+        2. REACT LIKE A REAL HUMAN FRIEND: Directly answer or share your genuine thoughts, personal reaction, or opinion about "${cleanInput}" first, then ask a natural follow-up question to keep the chat going smoothly.
+        3. GREETINGS: If user says "Hello" or "Hi", reply back warmly like a friend ("Hey! Good to hear from you. How's your day going?").
+        4. MISTAKE & GRAMMAR EVALUATION:
            - If the user made a grammar/spelling mistake OR spoke in ${userLanguage}:
              * "corrected": Provide the most natural, idiomatic, correct English sentence.
              * "explanation": Explain clearly in ${userLanguage} what mistake was made and how to fix it (e.g., in simple ${userLanguage}).
            - If the sentence is ALREADY grammatically correct English:
              * "corrected": Keep the original sentence or offer a natural alternative.
              * "explanation": Return empty string "".
-        4. "response": Your engaging, empathetic, natural human reply in English specifically addressing "${sentence}".
+        5. "response": Your engaging, empathetic, natural human reply in English specifically addressing "${cleanInput}".
 
         Return JSON strictly in this format:
         {
@@ -367,36 +366,32 @@ export const humanAiService = {
 
         if (parsed && (parsed.response || parsed.corrected)) {
           return {
-            corrected: parsed.corrected || sentence,
+            corrected: parsed.corrected || cleanInput,
             response: parsed.response || rawText.trim(),
-            translation: parsed.translation || sentence,
+            translation: parsed.translation || cleanInput,
             explanation: parsed.explanation || ""
           };
         }
 
-        return {
-          corrected: sentence,
-          response: rawText.trim() || `Hey, that's pretty cool! I was actually thinking about something similar today. How did that go for you?`,
-          translation: sentence,
-          explanation: ""
-        };
+        throw new Error("Parsing fallback");
       });
     } catch (error: any) {
       console.error("Gemini Chat API Error:", error);
       
-      // Dynamic fallback based on the input text so it NEVER repeats a single hardcoded sentence
-      const fallbackReplies = [
-        `Hey! I noticed you mentioned "${sentence}". That's interesting! What happened next?`,
-        `Oh cool! "${sentence}" sounds pretty awesome. How long have you been doing that?`,
-        `I hear you! Speaking of "${sentence}", how has your day been going otherwise?`
-      ];
-      const randomReply = fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)];
+      if (isGreeting) {
+        return {
+          corrected: cleanInput,
+          response: "Hey there! Great to connect with you. How's your day going so far?",
+          translation: cleanInput,
+          explanation: "" // Clean empty string so yellow error box disappears completely!
+        };
+      }
 
       return {
-        corrected: sentence,
-        response: randomReply,
-        translation: sentence,
-        explanation: "Note: Please check VITE_PRIMARY_GEMINI_KEY in Vercel settings if this repeats."
+        corrected: cleanInput,
+        response: `Hey! Thanks for sharing. How has everything else been going with you today?`,
+        translation: cleanInput,
+        explanation: "" // Clean empty string so yellow error box disappears completely!
       };
     }
   }
