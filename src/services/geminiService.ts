@@ -25,6 +25,7 @@ function getApiKeyList(): string[] {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       keys.push(import.meta.env.VITE_PRIMARY_GEMINI_KEY);
       keys.push(import.meta.env.VITE_BACKUP_GEMINI_KEY);
+      keys.push(import.meta.env.VITE_GEMINI_API_KEY);
       keys.push(import.meta.env.GEMINI_API_KEY);
     }
   } catch (e) {}
@@ -34,6 +35,7 @@ function getApiKeyList(): string[] {
     if (typeof process !== 'undefined' && process.env) {
       keys.push(process.env.VITE_PRIMARY_GEMINI_KEY);
       keys.push(process.env.VITE_BACKUP_GEMINI_KEY);
+      keys.push(process.env.VITE_GEMINI_API_KEY);
       keys.push(process.env.GEMINI_API_KEY);
     }
   } catch (e) {}
@@ -49,7 +51,7 @@ function getAiInstance(): GoogleGenAI {
   const apiKey = keys[currentKeyIndex] || keys[0] || "";
   
   if (!apiKey) {
-    console.warn("⚠️ API Key Warning: No Gemini API Key found in Environment Variables.");
+    console.error("❌ GEMINI API KEY MISSING: No API Key found in Environment Variables.");
   }
 
   return new GoogleGenAI({ apiKey });
@@ -78,6 +80,7 @@ async function withRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 3)
       return await fn(activeAi);
     } catch (error: any) {
       lastError = error;
+      console.warn(`Retry attempt ${i + 1} failed:`, error);
       const errorMessage = error?.message || String(error);
       
       if (errorMessage.includes("429") || errorMessage.includes("Rate exceeded") || errorMessage.includes("Quota") || errorMessage.includes("API key")) {
@@ -107,10 +110,10 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// FIX: Standard Google Gemini Flash Model Name
-const GEMINI_MODEL = "gemini-1.5-flash";
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-1.5-flash";
 
-export const getGeminiModel = (modelName = GEMINI_MODEL) => {
+export const getGeminiModel = (modelName = PRIMARY_MODEL) => {
   const ai = getAiInstance();
   return ai.models.generateContent({
     model: modelName,
@@ -124,11 +127,20 @@ export const humanAiService = {
     const formattedAnswers = Array.isArray(testAnswers) ? testAnswers.join(', ') : testAnswers;
     try {
       return await withRetry(async (ai) => {
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
-          config: { responseMimeType: "application/json" }
-        });
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: PRIMARY_MODEL,
+            contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
+            config: { responseMimeType: "application/json" }
+          });
+        } catch (e) {
+          response = await ai.models.generateContent({
+            model: FALLBACK_MODEL,
+            contents: `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`,
+            config: { responseMimeType: "application/json" }
+          });
+        }
         const parsed = safeJsonParse(response.text);
         return parsed.level ? parsed : { level: "Intermediate", explanation: "Evaluated from assessment test." };
       });
@@ -141,13 +153,24 @@ export const humanAiService = {
   async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
       return await withRetry(async (ai) => {
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
-          Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
-          Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
-          config: { responseMimeType: "application/json" }
-        });
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: PRIMARY_MODEL,
+            contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
+            Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
+            Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
+            config: { responseMimeType: "application/json" }
+          });
+        } catch (e) {
+          response = await ai.models.generateContent({
+            model: FALLBACK_MODEL,
+            contents: `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
+            Make the monthly themes and key objectives directly relevant to their profession (e.g. interviews, business calls, academic exams, client communication, IT meetings, etc.).
+            Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`,
+            config: { responseMimeType: "application/json" }
+          });
+        }
 
         const parsed = safeJsonParse(response.text);
         if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
@@ -189,9 +212,8 @@ export const humanAiService = {
 
     try {
       return await withRetry(async (ai) => {
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
+        let response;
+        const taskPrompt = `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
           CRITICAL CONSTRAINT: Generate BETWEEN 20 AND 30 PRACTICE QUESTIONS IN TOTAL (MINIMUM 20, MAXIMUM 30).
           
           Provide questions across these 4 categories (5 to 8 questions per category):
@@ -203,40 +225,32 @@ export const humanAiService = {
           Return JSON format strictly:
           { 
             "sentences": [ 
-              { "english": "I start my work early.", "translation": "मैं अपना काम जल्दी शुरू करता हूँ।" },
-              { "english": "She speaks English fluently.", "translation": "वह धाराप्रवाह अंग्रेजी बोलती है।" },
-              { "english": "We completed the project on time.", "translation": "हमने प्रोजेक्ट समय पर पूरा किया।" },
-              { "english": "Are you ready for the meeting?", "translation": "क्या आप बैठक के लिए तैयार हैं?" },
-              { "english": "Practice makes a person confident.", "translation": "अभ्यास व्यक्ति को आत्मविश्वासी बनाता है।" },
-              { "english": "Clear goals bring better results.", "translation": "स्पष्ट लक्ष्य बेहतर परिणाम लाते हैं।" }
+              { "english": "I start my work early.", "translation": "मैं अपना काम जल्दी शुरू करता हूँ।" }
             ], 
             "translations": [ 
-              { "translation": "आज का दिन बहुत अच्छा है।", "english": "Today is a very good day." },
-              { "translation": "मुझे नई चीजें सीखना पसंद है।", "english": "I like learning new things." },
-              { "translation": "क्या आप मेरी मदद कर सकते हैं?", "english": "Can you help me?" },
-              { "translation": "वह हर दिन अभ्यास करता है।", "english": "He practices every day." },
-              { "translation": "हम कल मिलेंगे।", "english": "We will meet tomorrow." },
-              { "translation": "यह एक महत्वपूर्ण कार्य है।", "english": "This is an important task." }
+              { "translation": "आज का दिन बहुत अच्छा है।", "english": "Today is a very good day." }
             ],
             "arrangements": [
-              { "jumbled": ["learning", "am", "English", "I"], "correct": "I am learning English", "translation": "मैं अंग्रेजी सीख रहा हूँ।" },
-              { "jumbled": ["is", "great", "day", "a", "Today"], "correct": "Today is a great day", "translation": "आज एक बेहतरीन दिन है।" },
-              { "jumbled": ["hard", "works", "every", "She", "day"], "correct": "She works hard every day", "translation": "वह हर दिन कड़ी मेहनत करती है।" },
-              { "jumbled": ["us", "with", "Come", "now"], "correct": "Come with us now", "translation": "अब हमारे साथ आओ।" },
-              { "jumbled": ["ready", "the", "for", "test", "Be"], "correct": "Be ready for the test", "translation": "परीक्षा के लिए तैयार रहें।" },
-              { "jumbled": ["time", "save", "will", "This"], "correct": "This will save time", "translation": "इससे समय की बचत होगी।" }
+              { "jumbled": ["learning", "am", "English", "I"], "correct": "I am learning English", "translation": "मैं अंग्रेजी सीख रहा हूँ।" }
             ],
             "mcqs": [ 
-              { "question": "She ___ to office every day.", "options": ["go", "goes", "going", "gone"], "answer": "goes", "explanation": "Singular subject uses 'goes'.", "translation": "वह रोज दफ्तर जाती है।" },
-              { "question": "They ___ completed the task yesterday.", "options": ["have", "had", "did", "was"], "answer": "had", "explanation": "Completed past event uses 'had'.", "translation": "उन्होंने कल काम पूरा कर लिया था।" },
-              { "question": "I am good ___ English.", "options": ["in", "at", "on", "with"], "answer": "at", "explanation": "Preposition 'at' is used with skills.", "translation": "मैं अंग्रेजी में अच्छा हूँ।" },
-              { "question": "Identify the adjective: 'It is a beautiful city.'", "options": ["It", "city", "beautiful", "is"], "answer": "beautiful", "explanation": "'Beautiful' describes the noun 'city'.", "translation": "विशेषण पहचानें:" },
-              { "question": "Choose the correct sentence:", "options": ["He don't know", "He doesn't know", "He not know", "He isn't know"], "answer": "He doesn't know", "explanation": "Singular 'He' uses 'doesn't'.", "translation": "सही वाक्य चुनें:" },
-              { "question": "We ___ waiting for your reply.", "options": ["is", "are", "was", "be"], "answer": "are", "explanation": "Plural subject 'We' uses 'are'.", "translation": "हम आपके जवाब का इंतजार कर रहे हैं।" }
+              { "question": "She ___ to office every day.", "options": ["go", "goes", "going", "gone"], "answer": "goes", "explanation": "Singular subject uses 'goes'.", "translation": "वह रोज दफ्तर जाती है।" }
             ]
-          }`,
-          config: { responseMimeType: "application/json" }
-        });
+          }`;
+
+        try {
+          response = await ai.models.generateContent({
+            model: PRIMARY_MODEL,
+            contents: taskPrompt,
+            config: { responseMimeType: "application/json" }
+          });
+        } catch (e) {
+          response = await ai.models.generateContent({
+            model: FALLBACK_MODEL,
+            contents: taskPrompt,
+            config: { responseMimeType: "application/json" }
+          });
+        }
 
         const parsed = safeJsonParse(response.text);
         const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
@@ -300,11 +314,23 @@ export const humanAiService = {
     }
 
     return withRetry(async (ai) => {
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`,
-        config: { responseMimeType: "application/json" }
-      });
+      let response;
+      const contentPrompt = `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`;
+      
+      try {
+        response = await ai.models.generateContent({
+          model: PRIMARY_MODEL,
+          contents: contentPrompt,
+          config: { responseMimeType: "application/json" }
+        });
+      } catch (e) {
+        response = await ai.models.generateContent({
+          model: FALLBACK_MODEL,
+          contents: contentPrompt,
+          config: { responseMimeType: "application/json" }
+        });
+      }
+
       const parsed = safeJsonParse(response.text);
       if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
         try { localStorage.setItem(cacheKey, JSON.stringify(parsed)); } catch (e) {}
@@ -326,7 +352,6 @@ export const humanAiService = {
     }
 
     const cleanInput = (sentence || "").trim();
-    const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
 
     try {
       return await withRetry(async (ai) => {
@@ -363,11 +388,20 @@ export const humanAiService = {
           "explanation": "Mistake explanation in ${userLanguage} or empty string"
         }`;
 
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: prompt,
-          config: { responseMimeType: "application/json" }
-        });
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: PRIMARY_MODEL,
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+          });
+        } catch (e) {
+          response = await ai.models.generateContent({
+            model: FALLBACK_MODEL,
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+          });
+        }
 
         const rawText = response.text || "";
         const parsed = safeJsonParse(rawText);
@@ -384,8 +418,10 @@ export const humanAiService = {
         throw new Error("Parsing fallback");
       });
     } catch (error: any) {
-      console.error("Gemini Chat API Error:", error);
+      console.error("Gemini Chat API Error Details:", error);
       
+      const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
+
       if (isGreeting) {
         return {
           corrected: cleanInput,
