@@ -46,7 +46,7 @@ interface ConversationProps {
 const DEFAULT_WELCOME_MESSAGE: Message = { 
   id: '1', 
   role: 'ai', 
-  text: "Hey there! I'm HumnAi. How's your day going so far?",
+  text: "Hey! I'm HumnAi. Great to chat with you today! How's everything going with you?",
   timestamp: Date.now()
 };
 
@@ -319,10 +319,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      // Pass full conversation history array so AI remembers context and talks humanly
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || `That's fascinating! What else is on your mind regarding "${transcript}"?`;
+      const aiResponseText = correctionData.response || `Oh cool! Tell me more about that.`;
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -348,13 +347,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       }
       
       speak(aiResponseText, 'en-US', () => {
-        if (correctionData.corrected && correctionData.corrected.toLowerCase() !== transcript.toLowerCase()) {
-          speak(`You can say it like this: ${correctionData.corrected}`, 'en-US', () => {
-            if (correctionData.explanation) {
-              speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
-            }
-          });
-        } else if (correctionData.explanation) {
+        if (correctionData.explanation) {
           speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
         }
       });
@@ -395,14 +388,13 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      // Pass full conversation history array so AI remembers context and talks humanly
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
       
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        text: correctionData.response || `That's awesome! What else would you like to discuss about "${formattedInput}"?`,
+        text: correctionData.response || `Oh nice! That sounds pretty cool.`,
         correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase() ? correctionData.corrected : undefined,
         translation: correctionData.translation,
         explanation: correctionData.explanation,
@@ -423,14 +415,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       }
       
       speak(aiMsg.text, 'en-US', () => {
-        if (correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase()) {
-          speak(`You can say it like this: ${correctionData.corrected}`, 'en-US', () => {
-            if (aiMsg.explanation) {
-              speak(aiMsg.explanation, langMap[targetLanguage] || 'hi-IN');
-            }
-          });
-        } else if (aiMsg.explanation) {
-          speak(aiMsg.explanation, langMap[targetLanguage] || 'hi-IN');
+        if (correctionData.explanation) {
+          speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
         }
       });
       
@@ -454,7 +440,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             </div>
             <div>
               <h3 className="font-bold text-[#111827] dark:text-white">HumnAi Chat</h3>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Chats auto-erase after 24 hrs</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Real Human Conversational Partner</p>
             </div>
           </div>
 
@@ -511,8 +497,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                     <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">"{msg.correction}"</p>
                     
                     {msg.explanation && (
-                      <div className="bg-white/50 dark:bg-black/20 p-2 rounded-lg mt-1">
-                        <p className="text-xs text-amber-800 dark:text-amber-200 italic">{msg.explanation}</p>
+                      <div className="bg-white/50 dark:bg-black/20 p-2.5 rounded-lg mt-1 border border-amber-200/50 dark:border-amber-800/30">
+                        <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block uppercase mb-0.5">Native Explanation ({targetLanguage}):</span>
+                        <p className="text-xs text-amber-900 dark:text-amber-100 font-medium leading-relaxed">{msg.explanation}</p>
                       </div>
                     )}
 
@@ -532,7 +519,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             <div className="flex justify-start">
               <div className="bg-white dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 p-3 rounded-2xl flex items-center gap-2 text-[#6B7280] dark:text-gray-400">
                 <Loader2 size={16} className="animate-spin text-indigo-600" />
-                <span className="text-sm">Thinking...</span>
+                <span className="text-sm">HumnAi is typing...</span>
               </div>
             </div>
           )}
