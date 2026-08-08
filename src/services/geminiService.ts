@@ -1,4 +1,3 @@
-// 1. LocalStorage se User ki Native Language read karne ka function
 export function getSelectedLanguageName(): string {
   if (typeof window === 'undefined') return 'Hindi';
   
@@ -14,7 +13,6 @@ export function getSelectedLanguageName(): string {
   return languageMap[savedLang.toLowerCase()] || savedLang || 'Hindi';
 }
 
-// 2. Safely extract all available Gemini API Keys (Vite Client & Process Fallback)
 function getApiKeyList(): string[] {
   const keys: (string | undefined)[] = [];
 
@@ -54,9 +52,7 @@ export function safeJsonParse(text: string | undefined): any {
   try {
     let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
     const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      cleanText = jsonMatch[0];
-    }
+    if (jsonMatch) cleanText = jsonMatch[0];
     return JSON.parse(cleanText);
   } catch (e) {
     console.error("Failed to parse Gemini JSON response:", text);
@@ -64,8 +60,8 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// DIRECT REST API EXECUTOR (Prevents SDK 404/Bundler Errors on Vercel)
-async function callGeminiRestApi(prompt: string, forceJson = true): Promise<string> {
+// REST API CALL WITH CORRECT GOOGLE ENDPOINT FORMAT
+async function callGeminiRestApi(prompt: string): Promise<string> {
   const keys = getApiKeyList();
   if (keys.length === 0) {
     console.error("❌ CRITICAL: No Gemini API Keys found in Environment Variables!");
@@ -76,19 +72,17 @@ async function callGeminiRestApi(prompt: string, forceJson = true): Promise<stri
 
   for (let attempt = 0; attempt < keys.length * 2; attempt++) {
     const activeKey = keys[currentKeyIndex] || keys[0];
+    // Models prefix endpoint fixed to prevent 404
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`;
 
-    const requestBody: any = {
+    const requestBody = {
       contents: [{
         parts: [{ text: prompt }]
-      }]
-    };
-
-    if (forceJson) {
-      requestBody.generationConfig = {
+      }],
+      generationConfig: {
         responseMimeType: "application/json"
-      };
-    }
+      }
+    };
 
     try {
       const response = await fetch(endpoint, {
@@ -108,11 +102,8 @@ async function callGeminiRestApi(prompt: string, forceJson = true): Promise<stri
       const errText = await response.text();
       console.warn(`Gemini API Call attempt failed (${response.status}):`, errText);
 
-      if (response.status === 429 || response.status === 403 || errText.includes("Quota") || errText.includes("API key")) {
-        rotateKey();
-        await new Promise(res => setTimeout(res, 1000));
-        continue;
-      }
+      rotateKey();
+      await new Promise(res => setTimeout(res, 1000));
     } catch (err) {
       lastError = err;
       rotateKey();
@@ -120,44 +111,36 @@ async function callGeminiRestApi(prompt: string, forceJson = true): Promise<stri
     }
   }
 
-  throw lastError || new Error("Gemini API calls failed on all available keys");
+  throw lastError || new Error("Gemini API calls failed");
 }
 
 export const humanAiService = {
-  // 5 QUESTIONS & PROFESSION BASED LEVEL ASSESSMENT
   async assessLevel(testAnswers: string | string[], profession: string = "General") {
     const formattedAnswers = Array.isArray(testAnswers) ? testAnswers.join(', ') : testAnswers;
     try {
-      const prompt = `Evaluate the English level (Beginner, Intermediate, Advanced) based on these 5 assessment answers: "${formattedAnswers}" for a person whose profession/goal is "${profession}". Return JSON strictly: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`;
-      const rawText = await callGeminiRestApi(prompt, true);
+      const prompt = `Evaluate the English level (Beginner, Intermediate, Advanced) based on: "${formattedAnswers}" for a "${profession}". Return JSON strictly: { "level": "Beginner/Intermediate/Advanced", "explanation": "Short reason" }`;
+      const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      return parsed.level ? parsed : { level: "Intermediate", explanation: "Evaluated from assessment test." };
+      return parsed.level ? parsed : { level: "Intermediate", explanation: "Evaluated level." };
     } catch (e) {
       return { level: "Beginner", explanation: "Default starting level." };
     }
   },
 
-  // PROFESSION & LEVEL TAILORED 12-MONTH ROADMAP GENERATOR
   async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
-      const prompt = `Create a 12-month high-level English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
-      Make the monthly themes and key objectives directly relevant to their profession.
-      Return JSON format strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... up to month 12 ] }`;
-      
-      const rawText = await callGeminiRestApi(prompt, true);
+      const prompt = `Create a 12-month English roadmap for ${level} level student in ${profession}. Return JSON strictly: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] } ] }`;
+      const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
       if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
         return parsed;
       }
       throw new Error("Invalid roadmap structure");
     } catch (error) {
-      console.error("Roadmap generation failed, serving fallback plan", error);
       const defaultThemes = [
-        { theme: `Foundations & Professional Intro for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary", "Professional introduction"] },
-        { theme: "Present & Past Tenses in Work", objectives: ["Simple Present Tense in daily work", "Simple Past Tense for tasks", "Action verbs"] },
-        { theme: "Future Tense & Polite Modals", objectives: ["Future projections & goal setting", "Modals (Could, Would, Should)", "Scheduling meetings"] }
+        { theme: `Foundations for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary"] },
+        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense"] }
       ];
-
       return {
         roadmap: defaultThemes.map((item, index) => ({
           month: index + 1,
@@ -168,72 +151,24 @@ export const humanAiService = {
     }
   },
 
-  // DAILY TASKS GENERATOR
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
-
     try {
-      const prompt = `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
-        Provide questions across these 4 categories (5 to 8 questions per category):
-        1. Speaking practice sentences (with ${userLanguage} translation).
-        2. Translation tasks (${userLanguage} to English).
-        3. Jumbled sentence arrangements.
-        4. Grammar MCQs with explanations in ${userLanguage}.
-        
-        Return JSON format strictly:
-        { 
-          "sentences": [ { "english": "I start my work early.", "translation": "मैं अपना काम जल्दी शुरू करता हूँ।" } ], 
-          "translations": [ { "translation": "आज का दिन अच्छा है।", "english": "Today is a good day." } ],
-          "arrangements": [ { "jumbled": ["learning", "am", "English", "I"], "correct": "I am learning English", "translation": "मैं अंग्रेजी सीख रहा हूँ।" } ],
-          "mcqs": [ { "question": "She ___ to office every day.", "options": ["go", "goes", "going", "gone"], "answer": "goes", "explanation": "Singular subject uses 'goes'.", "translation": "वह रोज दफ्तर जाती है।" } ]
-        }`;
-
-      const rawText = await callGeminiRestApi(prompt, true);
+      const prompt = `Generate daily English practice tasks in ${userLanguage} for ${level} level on Month ${month}, Day ${day}. Return JSON: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
+      const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
-      
-      if (parsed && total >= 5) {
-        return parsed;
-      }
-      throw new Error("Tasks count below minimum");
+      if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) return parsed;
+      throw new Error("Tasks error");
     } catch (error) {
       return {
-        sentences: [{ english: "I practice English every single day.", translation: "मैं हर दिन अंग्रेजी का अभ्यास करता हूँ।" }],
-        translations: [{ translation: "आपका दिन शुभ हो।", english: "Have a nice day." }],
-        arrangements: [{ jumbled: ["English", "learning", "am", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" }],
-        mcqs: [{ question: "He ___ to market yesterday.", options: ["go", "went", "gone", "going"], answer: "went", explanation: "Past tense of 'go' is 'went'.", translation: "वह कल बाजार गया था।" }]
+        sentences: [{ english: "I practice English daily.", translation: "मैं रोज अंग्रेजी अभ्यास करता हूँ।" }],
+        translations: [{ translation: "आपका दिन कैसा था?", english: "How was your day?" }],
+        arrangements: [{ jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" }],
+        mcqs: [{ question: "She ___ to work daily.", options: ["go", "goes", "going"], answer: "goes", explanation: "Singular takes 'goes'.", translation: "वह रोज काम पर जाती है।" }]
       };
     }
   },
 
-  async getDailyLearningContent(category: string, level: string, dayNumber: number = 1, targetLanguage?: string) {
-    const userLanguage = targetLanguage || getSelectedLanguageName();
-    const cacheKey = `humnai_cache_module_${category}_day${dayNumber}_${userLanguage.toLowerCase()}`;
-
-    if (typeof window !== 'undefined') {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (parsed && (parsed.vocabulary || parsed.explanation || parsed.topic)) return parsed;
-        } catch (e) {}
-      }
-    }
-
-    try {
-      const prompt = `You are an AI English Tutor. Generate DAY ${dayNumber} learning content for category: "${category}" at "${level}" level in ${userLanguage}. Return JSON format.`;
-      const rawText = await callGeminiRestApi(prompt, true);
-      const parsed = safeJsonParse(rawText);
-      if (typeof window !== 'undefined' && parsed && (parsed.topic || parsed.vocabulary || parsed.explanation)) {
-        try { localStorage.setItem(cacheKey, JSON.stringify(parsed)); } catch (e) {}
-      }
-      return parsed;
-    } catch (err) {
-      return {};
-    }
-  },
-
-  // REAL HUMAN-LIKE CONVERSATIONAL CHAT WITH NATIVE MISTAKE EXPLANATION
   async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
     let historyContext: string[] = [];
     let userLanguage = getSelectedLanguageName();
@@ -254,31 +189,30 @@ export const humanAiService = {
 
       const seed = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
 
-      const prompt = `You are HumnAi, a warm, witty, genuine human friend and English language tutor chatting with a friend on WhatsApp.
+      const prompt = `You are HumnAi, a warm, witty human friend and English tutor chatting on WhatsApp.
       Session Seed: ${seed}
 
       ${historyPrompt}
-      USER'S INPUT SENTENCE: "${cleanInput}"
+      USER'S INPUT MESSAGE: "${cleanInput}"
 
-      STRICT HUMANOID & TUTORING INSTRUCTIONS:
-      1. CRITICAL GRAMMAR & PHRASING EVALUATION:
-         - Carefully check "${cleanInput}" for grammar mistakes, unnatural phrasing, missing words, or if the user spoke in ${userLanguage}.
-         - "corrected": Always provide the most natural, polished, native-sounding English sentence. (e.g., if user says "I want to talk with you can you please talk with me", correct it to "I want to talk with you. Could you please chat with me for a couple of minutes?")
-         - "explanation": Explain clearly and warmly in ${userLanguage} what mistake was made and why the corrected version sounds more natural.
-         - If user sentence is ALREADY 100% perfect, set "corrected" to original text and "explanation" to "".
-      2. FRIENDLY CONVERSATIONAL RESPONSE:
-         - "response": Write a warm, casual, human reply in English naturally continuing the conversation like a real WhatsApp friend.
-         - NEVER use robotic lines like "What would you like to know about this?" or "Tell me more about X".
+      STRICT TUTORING & CONVERSATION INSTRUCTIONS:
+      1. GRAMMAR & NATURAL PHRASING CORRECTION:
+         - Evaluate "${cleanInput}" for grammar mistakes, missing words, word order, or unnatural phrasing.
+         - "corrected": ALWAYS provide a polished, natural English version (e.g. for "Can you please talk with me for couple of minutes", correct it to "Could you please talk with me for a couple of minutes?").
+         - "explanation": ALWAYS write a clear, supportive explanation in ${userLanguage} describing what mistake was made and why the corrected version sounds better.
+         - If the input is ALREADY 100% perfect, polished English: set "corrected" to original input and "explanation" to "".
+      2. FRIENDLY HUMAN RESPONSE:
+         - "response": Reply warmly in English continuing the chat like a real human friend.
 
       Return JSON strictly in this exact format:
       {
-        "corrected": "Refined and corrected English sentence",
-        "response": "Your friendly, casual human conversational reply in English",
+        "corrected": "Corrected English sentence",
+        "response": "Friendly human conversational response in English",
         "translation": "${userLanguage} translation of user sentence",
-        "explanation": "Grammar/spelling mistake explanation written in ${userLanguage} (or empty string if 100% correct)"
+        "explanation": "Mistake explanation written in ${userLanguage} (or empty string if 100% correct)"
       }`;
 
-      const rawText = await callGeminiRestApi(prompt, true);
+      const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
 
       if (parsed && (parsed.response || parsed.corrected)) {
@@ -290,21 +224,10 @@ export const humanAiService = {
         };
       }
 
-      throw new Error("Empty or invalid JSON output");
+      throw new Error("Empty JSON output");
     } catch (error: any) {
-      console.error("Gemini Direct REST Chat Error:", error);
+      console.error("Gemini REST API Error:", error);
       
-      const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
-
-      if (isGreeting) {
-        return {
-          corrected: cleanInput,
-          response: "Hey there! Great to connect with you. How's your day going so far?",
-          translation: cleanInput,
-          explanation: ""
-        };
-      }
-
       return {
         corrected: cleanInput,
         response: `Hey! Thanks for chatting. I'm right here—what else is on your mind today?`,
