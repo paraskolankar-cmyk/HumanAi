@@ -321,15 +321,17 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     try {
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || `Oh cool! Tell me more about that.`;
+      const aiResponseText = correctionData.response || "That sounds really interesting!";
       
+      const isCorrectionNeeded = correctionData.corrected && correctionData.corrected.trim().toLowerCase() !== transcript.trim().toLowerCase();
+
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
         text: aiResponseText,
-        correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== transcript.toLowerCase() ? correctionData.corrected : undefined,
+        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation,
+        explanation: correctionData.explanation || undefined,
         timestamp: Date.now()
       };
 
@@ -390,14 +392,17 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     try {
       const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
       const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
+      const aiResponseText = correctionData.response || "That's really cool!";
       
+      const isCorrectionNeeded = correctionData.corrected && correctionData.corrected.trim().toLowerCase() !== formattedInput.trim().toLowerCase();
+
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        text: correctionData.response || `Oh nice! That sounds pretty cool.`,
-        correction: correctionData.corrected && correctionData.corrected.toLowerCase() !== formattedInput.toLowerCase() ? correctionData.corrected : undefined,
+        text: aiResponseText,
+        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: correctionData.explanation,
+        explanation: correctionData.explanation || undefined,
         timestamp: Date.now()
       };
 
@@ -484,27 +489,31 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                   )}
                 </div>
                 
-                {msg.correction && (
+                {(msg.correction || msg.explanation) && (
                   <motion.div 
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 p-3 rounded-xl flex flex-col gap-1"
+                    className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 p-3.5 rounded-2xl flex flex-col gap-2"
                   >
-                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
-                      <AlertCircle size={14} />
-                      <span className="text-xs font-bold uppercase tracking-wider">Natural Refinement</span>
-                    </div>
-                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">"{msg.correction}"</p>
+                    {msg.correction && (
+                      <div>
+                        <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 mb-1">
+                          <AlertCircle size={14} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Natural Refinement</span>
+                        </div>
+                        <p className="text-sm font-bold text-amber-950 dark:text-amber-100">"{msg.correction}"</p>
+                      </div>
+                    )}
                     
                     {msg.explanation && (
-                      <div className="bg-white/50 dark:bg-black/20 p-2.5 rounded-lg mt-1 border border-amber-200/50 dark:border-amber-800/30">
-                        <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block uppercase mb-0.5">Native Explanation ({targetLanguage}):</span>
+                      <div className="bg-white/60 dark:bg-black/30 p-3 rounded-xl border border-amber-200/50 dark:border-amber-800/40">
+                        <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block uppercase mb-1">Native Grammar Explanation ({targetLanguage}):</span>
                         <p className="text-xs text-amber-900 dark:text-amber-100 font-medium leading-relaxed">{msg.explanation}</p>
                       </div>
                     )}
 
                     {msg.translation && (
-                      <div className="flex items-center gap-1 text-amber-600 dark:text-amber-500 text-xs mt-1">
+                      <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs pt-1 border-t border-amber-100 dark:border-amber-900/30">
                         <Languages size={12} />
                         <span>{msg.translation}</span>
                       </div>
