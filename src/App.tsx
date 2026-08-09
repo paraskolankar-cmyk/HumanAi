@@ -19,7 +19,6 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 import Dashboard from './components/Dashboard';
 import Practice from './components/Practice';
 import Conversation from './components/Conversation';
@@ -31,7 +30,7 @@ import Pricing from './components/Pricing';
 import Logo from './components/Logo';
 import OnboardingQuiz, { OnboardingData } from './components/OnboardingQuiz';
 import { dbService } from './services/dbService';
-import { safeJsonParse } from './services/geminiService';
+import { humanAiService } from './services/geminiService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -109,30 +108,22 @@ export default function App() {
           if ((!trialTranslations || lastTranslatedLang !== nativeLang) && !isTranslatingTrial) {
             setIsTranslatingTrial(true);
             try {
-              const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-              const response = await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
-                contents: `Translate the following English strings into ${nativeLang}. 
-                Return a JSON object with these keys:
-                - title: "Free Trial Expired!"
-                - message: "Your 24-hour free trial has ended. Upgrade to Pro to unlock unlimited AI conversations and all learning modules."
-                - button: "Get Pro Plan"
-                - secondary: "Maybe Later"
-                `,
-                config: {
-                  responseMimeType: "application/json",
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      message: { type: Type.STRING },
-                      button: { type: Type.STRING },
-                      secondary: { type: Type.STRING },
-                    }
-                  }
-                }
-              });
-              const result = safeJsonParse(response.text);
+              // FIX: previously used a direct @google/genai SDK call with
+              // `process.env.GEMINI_API_KEY` (always undefined in the Vite
+              // client bundle -- needs a VITE_ prefix to be exposed) and an
+              // invalid model name ("gemini-3-flash-preview" doesn't exist),
+              // so this ALWAYS silently failed and fell back to English.
+              // Now reuses the shared, working geminiService REST pipeline
+              // (same API key handling + model fallback chain as AI Chat).
+              const result = await humanAiService.translateUIStrings(
+                {
+                  title: "Free Trial Expired!",
+                  message: "Your 24-hour free trial has ended. Upgrade to Pro to unlock unlimited AI conversations and all learning modules.",
+                  button: "Get Pro Plan",
+                  secondary: "Maybe Later"
+                },
+                nativeLang
+              );
               setTrialTranslations(result);
               setLastTranslatedLang(nativeLang);
             } catch (error) {
