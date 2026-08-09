@@ -43,6 +43,7 @@ function rotateKey(): void {
   const keys = getApiKeyList();
   if (keys.length > 1) {
     currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+    console.warn(`🔄 Switched to Backup API Key Index #${currentKeyIndex}`);
   }
 }
 
@@ -61,7 +62,7 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// ULTRA-STABLE REST API CALLER (Supports multiple models & prevents 400/404 errors)
+// ULTRA-STABLE DIRECT REST API CALLER (Fixes 404 & REST Endpoint Format)
 async function callGeminiRestApi(prompt: string): Promise<string> {
   const keys = getApiKeyList();
   if (keys.length === 0) {
@@ -69,44 +70,47 @@ async function callGeminiRestApi(prompt: string): Promise<string> {
     throw new Error("Missing Gemini API Key in build bundle");
   }
 
-  const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
   let lastError: any = null;
 
   for (let kIndex = 0; kIndex < keys.length; kIndex++) {
     const activeKey = keys[(currentKeyIndex + kIndex) % keys.length];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`;
 
-    for (const model of models) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeKey}`;
-
-      const fullPrompt = prompt + "\n\nCRITICAL: Respond strictly in raw valid JSON format without markdown ticks.";
-
-      const requestBody = {
-        contents: [{
-          parts: [{ text: fullPrompt }]
-        }]
-      };
-
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody)
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          if (outputText.trim()) {
-            return outputText;
-          }
+    const requestBody = {
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
         }
-
-        const errText = await response.text();
-        console.warn(`Gemini API Call failed (${model}):`, errText);
-      } catch (err) {
-        lastError = err;
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        responseMimeType: "application/json"
       }
+    };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (outputText.trim()) {
+          return outputText;
+        }
+      }
+
+      const errText = await response.text();
+      console.warn(`Gemini API Call failed (${response.status}):`, errText);
+      lastError = new Error(`Status ${response.status}: ${errText}`);
+    } catch (err) {
+      lastError = err;
     }
+
     rotateKey();
   }
 
