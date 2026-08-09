@@ -1,8 +1,8 @@
 export function getSelectedLanguageName(): string {
   if (typeof window === 'undefined') return 'Hindi';
-  
+
   const savedLang = localStorage.getItem('humnai_user_language') || localStorage.getItem('humnai_native_language') || 'hi';
-  
+
   const languageMap: Record<string, string> = {
     hi: 'Hindi', bn: 'Bengali', mr: 'Marathi', te: 'Telugu', ta: 'Tamil',
     gu: 'Gujarati', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', en: 'English',
@@ -62,59 +62,81 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
+// Models tried in order — if the first is unavailable/deprecated in your account/region,
+// it automatically falls through to the next one instead of failing silently.
+const MODEL_FALLBACK_CHAIN = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash'
+];
+
 // ULTRA-STABLE DIRECT REST API CALLER (Fixes 404 & REST Endpoint Format)
 async function callGeminiRestApi(prompt: string): Promise<string> {
   const keys = getApiKeyList();
   if (keys.length === 0) {
-    console.error("❌ CRITICAL ERROR: No Gemini API Key exposed to Vite client!");
+    console.error("❌ CRITICAL ERROR: No Gemini API Key exposed to Vite client! Check that your env var is prefixed with VITE_ (e.g. VITE_PRIMARY_GEMINI_KEY) and set in your deployment (Vercel) env settings.");
     throw new Error("Missing Gemini API Key in build bundle");
   }
 
   let lastError: any = null;
 
-  for (let kIndex = 0; kIndex < keys.length; kIndex++) {
-    const activeKey = keys[(currentKeyIndex + kIndex) % keys.length];
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`;
+  for (const model of MODEL_FALLBACK_CHAIN) {
+    for (let kIndex = 0; kIndex < keys.length; kIndex++) {
+      const activeKey = keys[(currentKeyIndex + kIndex) % keys.length];
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeKey}`;
 
-    const requestBody = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
+      const requestBody = {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.9,
+          topP: 0.95,
+          responseMimeType: "application/json"
         }
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        responseMimeType: "application/json"
-      }
-    };
+      };
 
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody)
-      });
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody)
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (outputText.trim()) {
-          return outputText;
+        if (response.ok) {
+          const data = await response.json();
+          const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          if (outputText.trim()) {
+            return outputText;
+          }
+          console.warn(`⚠️ Gemini (${model}) returned empty output.`, data);
+        } else {
+          const errText = await response.text();
+          console.warn(`⚠️ Gemini API call failed [model: ${model}, status: ${response.status}]:`, errText);
+          lastError = new Error(`Model ${model} - Status ${response.status}: ${errText}`);
+
+          // 429 (rate limit) / 403 (bad key) -> try next key on this same model first
+          if (response.status === 429 || response.status === 403) {
+            rotateKey();
+            continue;
+          }
+
+          // 404 -> this model isn't available for this key/account, break to try next model
+          if (response.status === 404) {
+            break;
+          }
         }
+      } catch (err) {
+        console.error(`❌ Network/fetch error calling Gemini (${model}):`, err);
+        lastError = err;
       }
-
-      const errText = await response.text();
-      console.warn(`Gemini API Call failed (${response.status}):`, errText);
-      lastError = new Error(`Status ${response.status}: ${errText}`);
-    } catch (err) {
-      lastError = err;
     }
-
-    rotateKey();
   }
 
-  throw lastError || new Error("Gemini API REST endpoints failed");
+  throw lastError || new Error("All Gemini models/keys failed");
 }
 
 export const humanAiService = {
@@ -199,6 +221,16 @@ export const humanAiService = {
     }
   },
 
+  /**
+   * Main AI Chat handler.
+   *
+   * IMPORTANT FOR UI: this now returns a ready-to-display `message` field that
+   * already combines correction + native-language explanation + natural reply
+   * in the right order (so even if your chat bubble only renders one field,
+   * it will show the full tutoring flow). The individual fields (`corrected`,
+   * `response`, `explanation`, `translation`) are still returned separately
+   * in case you want to style them differently (e.g. correction in a colored box).
+   */
   async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
     let historyContext: string[] = [];
     let userLanguage = getSelectedLanguageName();
@@ -213,68 +245,78 @@ export const humanAiService = {
     const cleanInput = (sentence || "").trim();
 
     try {
-      const historyPrompt = historyContext.length > 0 
-        ? `PREVIOUS CONVERSATION HISTORY:\n${historyContext.slice(-6).join('\n')}\n` 
+      const historyPrompt = historyContext.length > 0
+        ? `PREVIOUS CONVERSATION HISTORY (most recent last):\n${historyContext.slice(-6).join('\n')}\n`
         : '';
 
       const seed = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
 
-      const prompt = `You are HumnAi, a warm, witty human friend and English tutor chatting on WhatsApp.
-      Session Seed: ${seed}
+      const prompt = `You are HumnAi — a warm, witty, human-like English speaking partner chatting on WhatsApp with a ${userLanguage}-speaking learner. You are NOT a robot and must never sound scripted or repeat the same phrasing across turns. Vary your vocabulary, tone, and sentence structure every single time.
 
-      ${historyPrompt}
-      USER'S INPUT MESSAGE: "${cleanInput}"
+Session Seed (ignore this number, just use it to make sure you vary your reply): ${seed}
 
-      STRICT TUTORING & CONVERSATION INSTRUCTIONS:
-      1. GRAMMAR & NATURAL PHRASING CORRECTION:
-         - Evaluate "${cleanInput}" for grammar mistakes, missing prepositions/articles, tense issues, or unnatural phrasing.
-         - "corrected": Provide a polished, natural English version. (Example: For "I go to market", correct it to "I am going to the market.")
-         - "explanation": Write a clear, friendly explanation in ${userLanguage} describing what mistake was made and how to fix it.
-         - If the input is ALREADY 100% perfect, polished English: set "corrected" to original input and "explanation" to "".
-      2. FRIENDLY HUMAN RESPONSE:
-         - "response": Write a warm, casual, human reply in English naturally continuing the conversation like a real WhatsApp friend.
+${historyPrompt}
+USER'S LATEST MESSAGE: "${cleanInput}"
 
-      Return JSON strictly in this exact format:
-      {
-        "corrected": "Corrected English sentence",
-        "response": "Friendly human conversational response in English",
-        "translation": "${userLanguage} translation of user sentence",
-        "explanation": "Mistake explanation written in ${userLanguage} (or empty string if 100% correct)"
-      }`;
+YOUR JOB — follow this exact order of thinking:
+1. Check "${cleanInput}" for grammar mistakes, wrong tense, missing articles/prepositions, or unnatural phrasing.
+2. If there IS a mistake:
+   - Gently correct it FIRST, like a friend would — short, warm, not preachy. Example style: "Just a tiny tweak — say 'I am going to the market' instead of 'I go to market' 🙂"
+   - THEN explain WHY, briefly, written naturally in ${userLanguage} (not English), so the learner truly understands the rule in their own language.
+   - THEN continue the conversation naturally in English, reacting to what the user actually said (ask a follow-up question or share a relevant thought — like real WhatsApp chat, not generic filler).
+3. If the sentence is ALREADY correct and natural:
+   - Skip correction and explanation entirely.
+   - Just reply naturally in English, continuing the conversation like a real friend, reacting specifically to what they said.
+4. NEVER use generic filler like "Thanks for chatting" or "What else is on your mind" — always react to the ACTUAL content of their message.
+
+Return STRICT JSON in exactly this format, nothing else:
+{
+  "corrected": "Corrected/natural English version of user's sentence",
+  "explanation": "Friendly explanation of the mistake, written in ${userLanguage}. Empty string \"\" if no mistake.",
+  "response": "Natural, specific, human English reply continuing the conversation",
+  "translation": "${userLanguage} translation of the user's original sentence",
+  "message": "The FULL combined chat bubble text: (correction line, only if needed) + (explanation in ${userLanguage}, only if needed) + (natural response). Written as one flowing, friendly WhatsApp-style message a human tutor friend would actually send."
+}`;
 
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
 
-      if (parsed && (parsed.response || parsed.corrected)) {
+      if (parsed && (parsed.response || parsed.corrected || parsed.message)) {
+        const response = parsed.response || rawText.trim();
+        const explanation = parsed.explanation || "";
+        const corrected = parsed.corrected || cleanInput;
+
+        // Build a safe fallback combined message in case the model didn't return `message`
+        const fallbackMessage = [
+          explanation && corrected !== cleanInput ? `✅ ${corrected}` : null,
+          explanation || null,
+          response
+        ].filter(Boolean).join('\n\n');
+
         return {
-          corrected: parsed.corrected || cleanInput,
-          response: parsed.response || rawText.trim(),
+          corrected,
+          response,
           translation: parsed.translation || cleanInput,
-          explanation: parsed.explanation || ""
+          explanation,
+          message: parsed.message || fallbackMessage
         };
       }
 
       throw new Error("Empty or invalid JSON output from Gemini REST API");
     } catch (error: any) {
-      console.error("Gemini Direct REST Chat Error:", error);
-      
+      console.error("Gemini Direct REST Chat Error:", error?.message || error);
+
       const isGreeting = /^(hello|hi|hey|hola|namaste|good morning|good evening)[\s!.]*$/i.test(cleanInput);
 
       if (isGreeting) {
-        return {
-          corrected: cleanInput,
-          response: "Hey there! Great to connect with you. How's your day going so far?",
-          translation: cleanInput,
-          explanation: ""
-        };
+        const msg = "Hey there! Great to connect with you. How's your day going so far?";
+        return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
       }
 
-      return {
-        corrected: cleanInput,
-        response: `Hey! Thanks for chatting. I'm right here—what else is on your mind today?`,
-        translation: cleanInput,
-        explanation: ""
-      };
+      // Honest fallback instead of a fake-generic reply — tells the user (in their
+      // own language) that something went wrong, instead of pretending to chat normally.
+      const msg = `Hmm, mujhe abhi thoda connection issue aa raha hai 🙏 Ek baar phir se try karo: "${cleanInput}"`;
+      return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
     }
   }
 };
