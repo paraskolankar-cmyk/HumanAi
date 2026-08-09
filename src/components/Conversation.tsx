@@ -25,6 +25,7 @@ interface Message {
   translation?: string;
   explanation?: string;
   timestamp?: number;
+  isError?: boolean;
 }
 
 declare global {
@@ -301,6 +302,97 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     window.speechSynthesis.speak(utterance);
   };
 
+  /**
+   * SHARED message pipeline used by BOTH text input and voice input.
+   * Having one function means voice and typed chat can never drift apart
+   * or get fixed in only one place by mistake.
+   */
+  const processUserMessage = async (rawText: string) => {
+    const formattedText = rawText.trim().charAt(0).toUpperCase() + rawText.trim().slice(1);
+    if (!formattedText) return;
+
+    if (!isPro && messages.length >= 10) {
+      if (onTrialExpired) onTrialExpired();
+      return;
+    }
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: formattedText,
+      timestamp: Date.now()
+    };
+
+    const updatedMessages = [...messages, userMsg];
+    persistMessages(updatedMessages);
+
+    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
+    if (email) {
+      try { dbService.saveChatMessage(email, { role: 'user', text: formattedText }); } catch (e) {}
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
+      // NOTE: pass the SAME formattedText used in the chat bubble, so what the AI
+      // corrects/reacts to always matches exactly what the user sees they typed/said.
+      const correctionData = await humanAiService.correctSentence(formattedText, historyContext, targetLanguage);
+      const aiResponseText = correctionData.response || "That sounds really interesting!";
+
+      const cleanOriginal = formattedText.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
+
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: aiResponseText,
+        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
+        translation: correctionData.translation,
+        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
+        timestamp: Date.now()
+      };
+
+      const finalMessages = [...updatedMessages, aiMsg];
+      persistMessages(finalMessages);
+
+      if (email) {
+        try {
+          dbService.saveChatMessage(email, {
+            role: 'ai',
+            text: aiMsg.text,
+            correction: aiMsg.correction,
+            translation: aiMsg.translation,
+            explanation: aiMsg.explanation
+          });
+        } catch (e) {}
+      }
+
+      speak(aiResponseText, 'en-US', () => {
+        if (correctionData.explanation) {
+          speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
+        }
+      });
+    } catch (error) {
+      console.error("AI message processing failed:", error);
+
+      // Previously: on error, nothing was shown to the user — the spinner would
+      // just vanish and the chat would look "stuck" with no reply at all.
+      // Now: show a visible, friendly error bubble so the user knows what happened.
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: "Sorry, mujhe reply generate karne mein thodi problem ho rahi hai. Please dobara try karo 🙏",
+        timestamp: Date.now(),
+        isError: true
+      };
+      persistMessages([...updatedMessages, errorMsg]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleVoiceInput = async (transcript: string) => {
     if (!transcript.trim()) return;
 
@@ -310,151 +402,16 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       } catch (e) {}
     }
 
-    const formattedTranscript = transcript.trim().charAt(0).toUpperCase() + transcript.trim().slice(1);
-    
-    if (!isPro && messages.length >= 10) {
-      if (onTrialExpired) onTrialExpired();
-      return;
-    }
-
-    const userMsg: Message = { 
-      id: Date.now().toString(), 
-      role: 'user', 
-      text: formattedTranscript,
-      timestamp: Date.now()
-    };
-    
-    const updatedMessages = [...messages, userMsg];
-    persistMessages(updatedMessages);
-    
-    // Fail-safe DB Save
-    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
-    if (email) {
-      try { dbService.saveChatMessage(email, { role: 'user', text: formattedTranscript }); } catch (e) {}
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
-      const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || "That sounds really interesting!";
-      
-      const cleanOriginal = transcript.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
-
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: aiResponseText,
-        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
-        translation: correctionData.translation,
-        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
-        timestamp: Date.now()
-      };
-
-      const finalMessages = [...updatedMessages, aiMsg];
-      persistMessages(finalMessages);
-
-      if (email) {
-        try {
-          dbService.saveChatMessage(email, { 
-            role: 'ai', 
-            text: aiMsg.text,
-            correction: aiMsg.correction,
-            translation: aiMsg.translation,
-            explanation: aiMsg.explanation
-          });
-        } catch (e) {}
-      }
-      
-      speak(aiResponseText, 'en-US', () => {
-        if (correctionData.explanation) {
-          speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
-        }
-      });
-    } catch (error) {
-      console.error("AI Voice processing failed", error);
-    } finally {
-      setIsProcessing(false);
-    }
+    await processUserMessage(transcript);
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isProcessing) return;
 
-    const formattedInput = inputText.trim().charAt(0).toUpperCase() + inputText.trim().slice(1);
-    
-    if (!isPro && messages.length >= 10) {
-      if (onTrialExpired) onTrialExpired();
-      return;
-    }
-
-    const userMsg: Message = { 
-      id: Date.now().toString(), 
-      role: 'user', 
-      text: formattedInput,
-      timestamp: Date.now()
-    };
-    
-    const updatedMessages = [...messages, userMsg];
-    persistMessages(updatedMessages);
+    const textToSend = inputText;
     setInputText('');
-    
-    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
-    if (email) {
-      try { dbService.saveChatMessage(email, { role: 'user', text: formattedInput }); } catch (e) {}
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
-      const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || "That's really cool!";
-      
-      const cleanOriginal = formattedInput.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
-
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: aiResponseText,
-        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
-        translation: correctionData.translation,
-        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
-        timestamp: Date.now()
-      };
-
-      const finalMessages = [...updatedMessages, aiMsg];
-      persistMessages(finalMessages);
-
-      if (email) {
-        try {
-          dbService.saveChatMessage(email, { 
-            role: 'ai', 
-            text: aiMsg.text,
-            correction: aiMsg.correction,
-            translation: aiMsg.translation,
-            explanation: aiMsg.explanation
-          });
-        } catch (e) {}
-      }
-      
-      speak(aiMsg.text, 'en-US', () => {
-        if (correctionData.explanation) {
-          speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
-        }
-      });
-      
-    } catch (error) {
-      console.error("Error generating response:", error);
-    } finally {
-      setIsProcessing(false);
-    }
+    await processUserMessage(textToSend);
   };
 
   return (
@@ -496,10 +453,12 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                 <div className={`p-4 rounded-2xl shadow-sm relative group ${
                   msg.role === 'user' 
                     ? 'bg-[#4F46E5] text-white rounded-tr-none' 
-                    : 'bg-white dark:bg-gray-800 text-[#111827] dark:text-white rounded-tl-none border border-[#E5E7EB] dark:border-gray-700'
+                    : msg.isError
+                      ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 rounded-tl-none border border-red-200 dark:border-red-900/40'
+                      : 'bg-white dark:bg-gray-800 text-[#111827] dark:text-white rounded-tl-none border border-[#E5E7EB] dark:border-gray-700'
                 }`}>
                   <p className="text-sm md:text-base leading-relaxed pr-6">{msg.text}</p>
-                  {msg.role === 'ai' && (
+                  {msg.role === 'ai' && !msg.isError && (
                     <button 
                       onClick={() => {
                         speak(msg.text);
@@ -566,6 +525,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             <div className="relative">
               <button 
                 type="button" 
+                disabled={isProcessing}
                 onClick={() => {
                   if (isListening) {
                     recognitionRef.current?.stop();
@@ -577,7 +537,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                     }
                   }
                 }}
-                className={`p-2 rounded-xl transition-all cursor-pointer ${isListening ? 'bg-indigo-100 dark:bg-indigo-900/40 text-[#4F46E5] dark:text-indigo-400' : 'text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800'}`}
+                className={`p-2 rounded-xl transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isListening ? 'bg-indigo-100 dark:bg-indigo-900/40 text-[#4F46E5] dark:text-indigo-400' : 'text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800'}`}
               >
                 <Mic size={20} />
               </button>
