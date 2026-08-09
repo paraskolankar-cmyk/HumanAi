@@ -57,7 +57,10 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [targetLanguage, setTargetLanguage] = useState(() => {
-    return localStorage.getItem('humnai_user_language') || 'Hindi';
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('humnai_user_language') || localStorage.getItem('humnai_native_language') || 'Hindi';
+    }
+    return 'Hindi';
   });
   const [speechInputLang, setSpeechInputLang] = useState<'en-US' | 'native'>('en-US');
 
@@ -89,9 +92,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // LOAD CHAT HISTORY
+  // 1. LOAD CHAT HISTORY (FAIL-SAFE DB & LOCAL STORAGE)
   useEffect(() => {
-    const email = userEmail || localStorage.getItem('humnai_user_email');
+    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
     const storageKey = `humnai_chat_${email || 'guest'}`;
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
     const now = Date.now();
@@ -99,7 +102,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     const loadHistory = async () => {
       let activeMessages: Message[] = [];
 
-      const localData = localStorage.getItem(storageKey);
+      // LocalStorage First
+      const localData = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
       if (localData) {
         try {
           const parsed = JSON.parse(localData);
@@ -118,10 +122,11 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         }
       }
 
+      // DB Fallback (Wrapped in try-catch so 405/Network errors never block chat)
       if (email && activeMessages.length === 0) {
         try {
           const history = await dbService.getChatHistory(email);
-          if (history && history.length > 0) {
+          if (history && Array.isArray(history) && history.length > 0) {
             const dbMessages: Message[] = history.map((m: any) => ({
               id: m.id?.toString() || Date.now().toString(),
               role: m.role,
@@ -135,7 +140,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
             activeMessages = dbMessages.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
           }
         } catch (err) {
-          console.error("Failed to load chat history from database:", err);
+          console.warn("Failed to load chat history from database (using client storage fallback):", err);
         }
       }
 
@@ -156,13 +161,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const persistMessages = (updatedMessages: Message[]) => {
     setMessages(updatedMessages);
 
-    const email = userEmail || localStorage.getItem('humnai_user_email');
-    const storageKey = `humnai_chat_${email || 'guest'}`;
+    if (typeof window !== 'undefined') {
+      const email = userEmail || localStorage.getItem('humnai_user_email');
+      const storageKey = `humnai_chat_${email || 'guest'}`;
 
-    localStorage.setItem(storageKey, JSON.stringify({
-      messages: updatedMessages,
-      timestamp: Date.now()
-    }));
+      localStorage.setItem(storageKey, JSON.stringify({
+        messages: updatedMessages,
+        timestamp: Date.now()
+      }));
+    }
   };
 
   const clearChatHistory = () => {
@@ -174,6 +181,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
   // Initialize Speech Recognition
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
@@ -227,20 +236,29 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     }
 
     const updateVoices = () => {
-      window.speechSynthesis.getVoices();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.getVoices();
+      }
     };
     updateVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+    }
 
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
-      window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+      }
     };
   }, [speechInputLang, targetLanguage]);
 
   const speak = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
     window.speechSynthesis.cancel();
     
     isSpeakingRef.current = true;
@@ -309,9 +327,10 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     const updatedMessages = [...messages, userMsg];
     persistMessages(updatedMessages);
     
-    const email = userEmail || localStorage.getItem('humnai_user_email');
+    // Fail-safe DB Save
+    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
     if (email) {
-      dbService.saveChatMessage(email, { role: 'user', text: formattedTranscript });
+      try { dbService.saveChatMessage(email, { role: 'user', text: formattedTranscript }); } catch (e) {}
     }
 
     setIsProcessing(true);
@@ -321,8 +340,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       const correctionData = await humanAiService.correctSentence(transcript, historyContext, targetLanguage);
       const aiResponseText = correctionData.response || "That sounds really interesting!";
       
-      const cleanOriginal = transcript.trim().toLowerCase();
-      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase();
+      const cleanOriginal = transcript.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
       const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
 
       const aiMsg: Message = {
@@ -331,7 +350,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         text: aiResponseText,
         correction: isCorrectionNeeded ? correctionData.corrected : undefined,
         translation: correctionData.translation,
-        explanation: (isCorrectionNeeded || correctionData.explanation) ? correctionData.explanation : undefined,
+        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
         timestamp: Date.now()
       };
 
@@ -339,13 +358,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       persistMessages(finalMessages);
 
       if (email) {
-        dbService.saveChatMessage(email, { 
-          role: 'ai', 
-          text: aiMsg.text,
-          correction: aiMsg.correction,
-          translation: aiMsg.translation,
-          explanation: aiMsg.explanation
-        });
+        try {
+          dbService.saveChatMessage(email, { 
+            role: 'ai', 
+            text: aiMsg.text,
+            correction: aiMsg.correction,
+            translation: aiMsg.translation,
+            explanation: aiMsg.explanation
+          });
+        } catch (e) {}
       }
       
       speak(aiResponseText, 'en-US', () => {
@@ -382,9 +403,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     persistMessages(updatedMessages);
     setInputText('');
     
-    const email = userEmail || localStorage.getItem('humnai_user_email');
+    const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
     if (email) {
-      dbService.saveChatMessage(email, { role: 'user', text: formattedInput });
+      try { dbService.saveChatMessage(email, { role: 'user', text: formattedInput }); } catch (e) {}
     }
 
     setIsProcessing(true);
@@ -394,8 +415,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       const correctionData = await humanAiService.correctSentence(formattedInput, historyContext, targetLanguage);
       const aiResponseText = correctionData.response || "That's really cool!";
       
-      const cleanOriginal = formattedInput.trim().toLowerCase();
-      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase();
+      const cleanOriginal = formattedInput.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
       const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
 
       const aiMsg: Message = {
@@ -412,13 +433,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       persistMessages(finalMessages);
 
       if (email) {
-        dbService.saveChatMessage(email, { 
-          role: 'ai', 
-          text: aiMsg.text,
-          correction: aiMsg.correction,
-          translation: aiMsg.translation,
-          explanation: aiMsg.explanation
-        });
+        try {
+          dbService.saveChatMessage(email, { 
+            role: 'ai', 
+            text: aiMsg.text,
+            correction: aiMsg.correction,
+            translation: aiMsg.translation,
+            explanation: aiMsg.explanation
+          });
+        } catch (e) {}
       }
       
       speak(aiMsg.text, 'en-US', () => {
