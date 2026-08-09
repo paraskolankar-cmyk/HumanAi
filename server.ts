@@ -109,18 +109,18 @@ class PureJSDB {
       const table = insertMatch[1].toLowerCase();
       const colStr = insertMatch[2];
       const columns = colStr.split(',').map(c => c.trim().toLowerCase());
-      
+
       const record: Record<string, any> = {};
       if (['users', 'chat_messages', 'payments', 'assessment_questions'].includes(table)) {
         const list = this.data[table] || [];
         const maxId = list.reduce((max: number, item: any) => (item.id && item.id > max) ? item.id : max, 0);
         record.id = maxId + 1;
       }
-      
+
       columns.forEach((col, idx) => {
         record[col] = args[idx];
       });
-      
+
       if (!this.data[table]) {
         this.data[table] = [];
       }
@@ -134,13 +134,13 @@ class PureJSDB {
       const table = updateMatch[1].toLowerCase();
       const setClause = updateMatch[2];
       const whereKey = updateMatch[3].toLowerCase();
-      
+
       const setCols = setClause.split(',').map(s => s.split('=')[0].trim().toLowerCase());
       const whereVal = args[args.length - 1];
-      
+
       const list = this.data[table] || [];
       let changes = 0;
-      
+
       list.forEach((item: any) => {
         const itemWhereVal = item[whereKey] !== undefined ? item[whereKey] : item[whereKey === 'user_email' ? 'user_email' : whereKey];
         if (String(itemWhereVal) === String(whereVal)) {
@@ -150,7 +150,7 @@ class PureJSDB {
           changes++;
         }
       });
-      
+
       if (changes > 0) {
         this.save();
       }
@@ -162,7 +162,7 @@ class PureJSDB {
       const table = deleteMatch[1].toLowerCase();
       const key = deleteMatch[2].toLowerCase();
       const val = args[0];
-      
+
       const originalLength = (this.data[table] || []).length;
       if (this.data[table]) {
         this.data[table] = this.data[table].filter((item: any) => {
@@ -170,7 +170,7 @@ class PureJSDB {
           return String(itemVal) !== String(val);
         });
       }
-      
+
       const changes = originalLength - (this.data[table] || []).length;
       if (changes > 0) {
         this.save();
@@ -201,13 +201,14 @@ class PureJSDB {
       ];
     }
 
+    // Support ORDER BY / LIMIT-less "WHERE col = ?" style select used by chat history lookups
     const matchWithWhere = sql.match(/SELECT\s+.*?\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*\?/i);
     if (matchWithWhere) {
       const table = matchWithWhere[1].toLowerCase();
       const key = matchWithWhere[2].toLowerCase();
       const val = args[0];
       let list = this.data[table] || [];
-      
+
       list = list.filter((item: any) => {
         const itemVal = item[key] !== undefined ? item[key] : item[key === 'user_email' ? 'user_email' : key];
         return String(itemVal) === String(val);
@@ -247,7 +248,7 @@ try {
 }
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
-const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET 
+const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
   ? new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -446,7 +447,8 @@ app.post("/api/gemini/assess-level", async (req, res) => {
     try {
       const result = await withRetry(async () => {
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          // FIX: "gemini-3.5-flash" does not exist and always 404'd.
+          model: "gemini-2.0-flash",
           contents: `Assess English level based on: ${testAnswers}. Return JSON with level & description.`,
           config: { responseMimeType: "application/json" }
         });
@@ -470,7 +472,7 @@ app.post("/api/user/sync", (req, res) => {
   if (!email) return res.status(400).json({ error: "Email required" });
 
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
-  
+
   if (!user) {
     db.prepare("INSERT INTO users (email, name, mobile, onboarding_json, progress_json, is_pro) VALUES (?, ?, ?, ?, ?, ?)").run(
       email, name || email.split('@')[0], mobile || null, onboarding ? JSON.stringify(onboarding) : null, progress ? JSON.stringify(progress) : null, isPro ? 1 : 0
@@ -482,15 +484,67 @@ app.post("/api/user/sync", (req, res) => {
     if (progress) db.prepare("UPDATE users SET progress_json = ? WHERE email = ?").run(JSON.stringify(progress), email);
     if (isPro !== undefined) db.prepare("UPDATE users SET is_pro = ? WHERE email = ?").run(isPro ? 1 : 0, email);
   }
-  
+
   const updatedUser = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
   res.json(updatedUser);
+});
+
+// ==========================================
+// NEW: CHAT HISTORY ROUTES
+// (These were MISSING — this is why the frontend was getting
+// "405 Method Not Allowed" / 404 on /api/chat/message. The
+// `chat_messages` table already existed, but no route ever
+// read from or wrote to it.)
+// ==========================================
+
+// 3. SAVE A CHAT MESSAGE (used by dbService.saveChatMessage)
+app.post("/api/chat/message", (req, res) => {
+  const { email, role, text, correction, translation, explanation } = req.body;
+
+  if (!email || !role || !text) {
+    return res.status(400).json({ message: "email, role and text are required." });
+  }
+
+  try {
+    db.prepare(
+      "INSERT INTO chat_messages (user_email, role, text, correction, translation, explanation) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      email,
+      role,
+      text,
+      correction || null,
+      translation || null,
+      explanation || null
+    );
+
+    res.status(201).json({ message: "Chat message saved." });
+  } catch (error: any) {
+    console.error("Save Chat Message Error:", error);
+    res.status(500).json({ message: "Failed to save chat message." });
+  }
+});
+
+// 4. GET CHAT HISTORY FOR A USER (used by dbService.getChatHistory)
+app.get("/api/chat/history", (req, res) => {
+  const email = (req.query.email as string) || "";
+
+  if (!email) {
+    return res.status(400).json({ message: "email query param is required." });
+  }
+
+  try {
+    const history = db.prepare("SELECT * FROM chat_messages WHERE user_email = ?").all(email);
+    res.json(history);
+  } catch (error: any) {
+    console.error("Get Chat History Error:", error);
+    res.status(500).json({ message: "Failed to fetch chat history." });
+  }
 });
 
 async function startServer() {
   const httpServer = createHttpServer(app);
   io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
-  const PORT = 5000; 
+  const PORT = 5000;
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
