@@ -326,18 +326,31 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
   const speak = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-
     window.speechSynthesis.cancel();
-    
+    speakRaw(text, lang, onComplete);
+  };
+
+  /**
+   * Same as `speak`, but WITHOUT calling speechSynthesis.cancel() first.
+   * Chrome has a known bug: calling cancel() immediately followed by
+   * speak() in quick succession (like chaining utterances back-to-back
+   * inside an onend callback) often fails SILENTLY — no error, it just
+   * never speaks. That's exactly why only the first item in a sequence
+   * (natural reply) was audible, and the correction + explanation that
+   * followed right after were getting swallowed.
+   */
+  const speakRaw = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
     isSpeakingRef.current = true;
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
     utterance.rate = 0.95;
-    
+
     const voices = window.speechSynthesis.getVoices();
     let preferredVoice;
-    
+
     if (lang.startsWith('en')) {
       preferredVoice = voices.find(v => v.lang === 'en-IN' || v.name.includes('India'));
       if (!preferredVoice) {
@@ -349,7 +362,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
       if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
     }
-    
+
     if (preferredVoice) utterance.voice = preferredVoice;
 
     utterance.onstart = () => {
@@ -371,17 +384,25 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
   /**
    * Speaks a sequence of {text, lang} items one after another, in order.
-   * Used so the AI actually PRONOUNCES the corrected sentence out loud
-   * (previously only the natural "response" was ever spoken — the
-   * correction only ever appeared silently in the amber text box).
+   * IMPORTANT: cancel() is called ONCE here, before the whole sequence
+   * starts — never between items — to avoid the Chrome cancel+speak race
+   * bug described above. A small delay is also added between items,
+   * since switching voice/language (English -> Hindi) back-to-back is
+   * another common trigger for silently-dropped utterances in Chrome.
    */
   const speakSequence = (items: { text: string; lang: string }[]) => {
     const queue = items.filter(i => i.text && i.text.trim().length > 0);
     if (queue.length === 0) return;
 
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
     const playNext = (index: number) => {
       if (index >= queue.length) return;
-      speak(queue[index].text, queue[index].lang, () => playNext(index + 1));
+      setTimeout(() => {
+        speakRaw(queue[index].text, queue[index].lang, () => playNext(index + 1));
+      }, 250);
     };
 
     playNext(0);
