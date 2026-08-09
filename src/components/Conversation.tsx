@@ -44,15 +44,36 @@ interface ConversationProps {
   onTrialExpired?: () => void;
 }
 
-const DEFAULT_WELCOME_MESSAGE: Message = { 
-  id: '1', 
-  role: 'ai', 
-  text: "Hey! I'm HumnAi. Great to chat with you today! How's everything going with you?",
-  timestamp: Date.now()
-};
+// Time + name aware welcome message — replaces the old hardcoded static greeting.
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Good night';
+}
+
+function buildWelcomeMessage(userName?: string | null): Message {
+  const greeting = getTimeGreeting();
+  const text = userName && userName.trim()
+    ? `${greeting}, ${userName.trim()}! 👋 Great to see you again. What would you like to talk about today?`
+    : `${greeting}! 👋 I'm HumnAi. What would you like to talk about today?`;
+
+  return {
+    id: `welcome_${Date.now()}`,
+    role: 'ai',
+    text,
+    timestamp: Date.now()
+  };
+}
 
 export default function Conversation({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired }: ConversationProps) {
-  const [messages, setMessages] = useState<Message[]>([DEFAULT_WELCOME_MESSAGE]);
+  const [messages, setMessages] = useState<Message[]>(() => [buildWelcomeMessage(userName)]);
+  // Guards against the loadHistory effect wiping an in-progress conversation
+  // (e.g. when userEmail resolves from null -> real value after auth loads,
+  // or the effect re-runs for any other reason mid-chat).
+  const hasLoadedOnceRef = useRef(false);
+  const lastLoadedEmailRef = useRef<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -100,6 +121,16 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
     const now = Date.now();
 
+    // Skip re-running for the SAME resolved email once we've already loaded —
+    // this is what stopped the "chat keeps replacing itself" bug. Previously
+    // this effect could re-run (e.g. userEmail resolving from null -> real
+    // value after auth finishes loading) and would unconditionally reset the
+    // whole conversation back to just the welcome message if no saved
+    // history was found yet, wiping out messages the user had just sent.
+    if (hasLoadedOnceRef.current && lastLoadedEmailRef.current === (email || null)) {
+      return;
+    }
+
     const loadHistory = async () => {
       let activeMessages: Message[] = [];
 
@@ -135,7 +166,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
               correction: m.correction,
               translation: m.translation,
               explanation: m.explanation,
-              timestamp: m.created_at ? new Date(m.created_at).getTime() : now
+              timestamp: m.timestamp ? new Date(m.timestamp).getTime() : (m.created_at ? new Date(m.created_at).getTime() : now)
             }));
 
             activeMessages = dbMessages.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
@@ -145,15 +176,51 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         }
       }
 
+      hasLoadedOnceRef.current = true;
+      lastLoadedEmailRef.current = email || null;
+
       if (activeMessages.length > 0) {
         setMessages(activeMessages);
       } else {
-        setMessages([DEFAULT_WELCOME_MESSAGE]);
+        // IMPORTANT: only reset to the welcome message if there's no
+        // in-progress conversation already sitting in memory. Otherwise a
+        // stray effect re-run would silently erase everything the user typed.
+        setMessages(prev => (prev.length > 1 ? prev : [buildWelcomeMessage(userName)]));
       }
     };
 
     loadHistory();
-  }, [userEmail]);
+  }, [userEmail, userName]);
+
+  // Live 24-hour auto-purge: even if the user keeps the app open past 24
+  // hours without refreshing, expired messages get cleared automatically.
+  useEffect(() => {
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setMessages(prev => {
+        const stillValid = prev.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
+        if (stillValid.length === prev.length) return prev; // nothing expired, avoid needless re-render
+
+        const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
+        const storageKey = `humnai_chat_${email || 'guest'}`;
+        const finalMessages = stillValid.length > 0 ? stillValid : [buildWelcomeMessage(userName)];
+
+        if (typeof window !== 'undefined') {
+          if (stillValid.length === 0) {
+            localStorage.removeItem(storageKey);
+          } else {
+            localStorage.setItem(storageKey, JSON.stringify({ messages: finalMessages, timestamp: now }));
+          }
+        }
+
+        return finalMessages;
+      });
+    }, 60 * 1000); // check every minute
+
+    return () => clearInterval(interval);
+  }, [userEmail, userName]);
 
   useEffect(() => {
     scrollToBottom();
@@ -175,7 +242,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
   const clearChatHistory = () => {
     if (confirm("Are you sure you want to clear your conversation history?")) {
-      const defaultMsg: Message[] = [DEFAULT_WELCOME_MESSAGE];
+      const defaultMsg: Message[] = [buildWelcomeMessage(userName)];
       persistMessages(defaultMsg);
     }
   };
@@ -303,6 +370,24 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   };
 
   /**
+   * Speaks a sequence of {text, lang} items one after another, in order.
+   * Used so the AI actually PRONOUNCES the corrected sentence out loud
+   * (previously only the natural "response" was ever spoken — the
+   * correction only ever appeared silently in the amber text box).
+   */
+  const speakSequence = (items: { text: string; lang: string }[]) => {
+    const queue = items.filter(i => i.text && i.text.trim().length > 0);
+    if (queue.length === 0) return;
+
+    const playNext = (index: number) => {
+      if (index >= queue.length) return;
+      speak(queue[index].text, queue[index].lang, () => playNext(index + 1));
+    };
+
+    playNext(0);
+  };
+
+  /**
    * SHARED message pipeline used by BOTH text input and voice input.
    * Having one function means voice and typed chat can never drift apart
    * or get fixed in only one place by mistake.
@@ -369,11 +454,15 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         } catch (e) {}
       }
 
-      speak(aiResponseText, 'en-US', () => {
-        if (correctionData.explanation) {
-          speak(correctionData.explanation, langMap[targetLanguage] || 'hi-IN');
-        }
-      });
+      // Speak in the right teaching order: corrected sentence first (so the
+      // user actually HEARS the correct pronunciation) -> explanation in
+      // their native language -> then the natural conversational reply.
+      const nativeLang = langMap[targetLanguage] || 'hi-IN';
+      speakSequence([
+        isCorrectionNeeded ? { text: correctionData.corrected, lang: 'en-US' } : { text: '', lang: 'en-US' },
+        correctionData.explanation ? { text: correctionData.explanation, lang: nativeLang } : { text: '', lang: nativeLang },
+        { text: aiResponseText, lang: 'en-US' }
+      ]);
     } catch (error) {
       console.error("AI message processing failed:", error);
 
@@ -461,10 +550,11 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                   {msg.role === 'ai' && !msg.isError && (
                     <button 
                       onClick={() => {
-                        speak(msg.text);
-                        if (msg.explanation) {
-                          setTimeout(() => speak(msg.explanation!, langMap[targetLanguage] || 'hi-IN'), 2000);
-                        }
+                        speakSequence([
+                          msg.correction ? { text: msg.correction, lang: 'en-US' } : { text: '', lang: 'en-US' },
+                          msg.explanation ? { text: msg.explanation, lang: langMap[targetLanguage] || 'hi-IN' } : { text: '', lang: 'hi-IN' },
+                          { text: msg.text, lang: 'en-US' }
+                        ]);
                       }}
                       className="absolute top-2 right-2 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
                     >
