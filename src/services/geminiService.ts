@@ -237,6 +237,24 @@ export const humanAiService = {
   },
 
   /**
+   * Translates small fixed UI strings (e.g. the trial-expired modal) into the
+   * user's native language. Reuses the same robust REST pipeline (retries,
+   * model fallback, key rotation) instead of a separate, broken direct
+   * @google/genai SDK call with a client-side-inaccessible API key.
+   */
+  async translateUIStrings(strings: Record<string, string>, targetLanguage: string) {
+    try {
+      const prompt = `Translate each value in this JSON object into ${targetLanguage}. Keep the same keys. Return ONLY a JSON object with the same keys, translated values, nothing else:\n${JSON.stringify(strings)}`;
+      const rawText = await callGeminiRestApi(prompt);
+      const parsed = safeJsonParse(rawText);
+      if (parsed && Object.keys(parsed).length > 0) return parsed;
+      throw new Error("Empty translation result");
+    } catch (err) {
+      return strings; // fall back to original (English) strings on failure
+    }
+  },
+
+  /**
    * Main AI Chat handler.
    *
    * IMPORTANT FOR UI: this now returns a ready-to-display `message` field that
