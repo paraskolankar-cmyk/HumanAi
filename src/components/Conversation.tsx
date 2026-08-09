@@ -109,9 +109,51 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const isSpeakingRef = useRef(false);
+  // Always-current snapshot of messages, kept in sync via effect below.
+  // Used for building AI prompt context WITHOUT relying on a closured
+  // `messages` value that could be stale if two sends race each other.
+  const messagesRef = useRef<Message[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const generateMessageId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  };
+
+  const persistToStorage = (updatedMessages: Message[]) => {
+    if (typeof window === 'undefined') return;
+    const email = userEmail || localStorage.getItem('humnai_user_email');
+    const storageKey = `humnai_chat_${email || 'guest'}`;
+    localStorage.setItem(storageKey, JSON.stringify({
+      messages: updatedMessages,
+      timestamp: Date.now()
+    }));
+  };
+
+  /**
+   * Appends a single message using a FUNCTIONAL state update (setMessages(prev => ...)).
+   * This is the critical fix for "new reply replaces old message" — the previous
+   * code built the next array from the `messages` variable captured in the
+   * surrounding closure (`[...messages, newMsg]`). If a second send started
+   * before the first one's state update had flushed (e.g. AI is still
+   * "typing" and another message goes out, or voice + typed input overlap),
+   * that closure held a STALE snapshot, and persisting it would silently
+   * overwrite/drop whatever the other in-flight call had just added.
+   * Functional updates always operate on the latest state, so this can't happen.
+   */
+  const appendMessage = (newMsg: Message) => {
+    setMessages(prev => {
+      const updated = [...prev, newMsg];
+      persistToStorage(updated);
+      return updated;
+    });
   };
 
   // 1. LOAD CHAT HISTORY (FAIL-SAFE DB & LOCAL STORAGE)
@@ -417,20 +459,20 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     const formattedText = rawText.trim().charAt(0).toUpperCase() + rawText.trim().slice(1);
     if (!formattedText) return;
 
-    if (!isPro && messages.length >= 10) {
+    if (!isPro && messagesRef.current.length >= 10) {
       if (onTrialExpired) onTrialExpired();
       return;
     }
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: generateMessageId(),
       role: 'user',
       text: formattedText,
       timestamp: Date.now()
     };
 
-    const updatedMessages = [...messages, userMsg];
-    persistMessages(updatedMessages);
+    // Functional append — never overwrites messages another in-flight call added.
+    appendMessage(userMsg);
 
     const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
     if (email) {
@@ -440,9 +482,13 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
     setIsProcessing(true);
 
     try {
-      const historyContext = updatedMessages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
-      // NOTE: pass the SAME formattedText used in the chat bubble, so what the AI
-      // corrects/reacts to always matches exactly what the user sees they typed/said.
+      // Build history context from the up-to-date ref (includes the userMsg
+      // we just appended, since React applies functional updates synchronously
+      // to messagesRef via the sync effect on the next render — but to be
+      // fully safe we just append it manually here for the prompt only).
+      const historySource = [...messagesRef.current, userMsg].slice(-10);
+      const historyContext = historySource.map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
+
       const correctionData = await humanAiService.correctSentence(formattedText, historyContext, targetLanguage);
       const aiResponseText = correctionData.response || "That sounds really interesting!";
 
@@ -451,7 +497,7 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
 
       const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: generateMessageId(),
         role: 'ai',
         text: aiResponseText,
         correction: isCorrectionNeeded ? correctionData.corrected : undefined,
@@ -460,8 +506,8 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         timestamp: Date.now()
       };
 
-      const finalMessages = [...updatedMessages, aiMsg];
-      persistMessages(finalMessages);
+      // Functional append again — same safety guarantee.
+      appendMessage(aiMsg);
 
       if (email) {
         try {
@@ -490,13 +536,13 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
       // just vanish and the chat would look "stuck" with no reply at all.
       // Now: show a visible, friendly error bubble so the user knows what happened.
       const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: generateMessageId(),
         role: 'ai',
         text: "Sorry, mujhe reply generate karne mein thodi problem ho rahi hai. Please dobara try karo 🙏",
         timestamp: Date.now(),
         isError: true
       };
-      persistMessages([...updatedMessages, errorMsg]);
+      appendMessage(errorMsg);
     } finally {
       setIsProcessing(false);
     }
