@@ -454,14 +454,13 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
         } catch (e) {}
       }
 
-      // Speak in the right teaching order: corrected sentence first (so the
-      // user actually HEARS the correct pronunciation) -> explanation in
-      // their native language -> then the natural conversational reply.
+      // Speak in the order requested: natural reply first -> then the
+      // correct way of saying it -> then native-language explanation.
       const nativeLang = langMap[targetLanguage] || 'hi-IN';
       speakSequence([
+        { text: aiResponseText, lang: 'en-US' },
         isCorrectionNeeded ? { text: correctionData.corrected, lang: 'en-US' } : { text: '', lang: 'en-US' },
-        correctionData.explanation ? { text: correctionData.explanation, lang: nativeLang } : { text: '', lang: nativeLang },
-        { text: aiResponseText, lang: 'en-US' }
+        correctionData.explanation ? { text: correctionData.explanation, lang: nativeLang } : { text: '', lang: nativeLang }
       ]);
     } catch (error) {
       console.error("AI message processing failed:", error);
@@ -551,9 +550,9 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
                     <button 
                       onClick={() => {
                         speakSequence([
+                          { text: msg.text, lang: 'en-US' },
                           msg.correction ? { text: msg.correction, lang: 'en-US' } : { text: '', lang: 'en-US' },
-                          msg.explanation ? { text: msg.explanation, lang: langMap[targetLanguage] || 'hi-IN' } : { text: '', lang: 'hi-IN' },
-                          { text: msg.text, lang: 'en-US' }
+                          msg.explanation ? { text: msg.explanation, lang: langMap[targetLanguage] || 'hi-IN' } : { text: '', lang: 'hi-IN' }
                         ]);
                       }}
                       className="absolute top-2 right-2 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
