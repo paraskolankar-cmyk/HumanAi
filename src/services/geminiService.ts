@@ -62,12 +62,16 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// Models tried in order — if the first is unavailable/deprecated in your account/region,
-// it automatically falls through to the next one instead of failing silently.
+// Models tried in order. NOTE: gemini-1.5-flash / gemini-1.5-flash-latest were
+// removed — they returned 404 (not available on this account/API version) and
+// were just wasting a request + burning quota on every single message.
+// Different model names often have SEPARATE free-tier quota buckets, so if
+// gemini-2.0-flash is rate-limited, trying a different model can still work.
 const MODEL_FALLBACK_CHAIN = [
+  'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-flash'
+  'gemini-2.5-flash-lite',
+  'gemini-flash-latest'
 ];
 
 // ULTRA-STABLE DIRECT REST API CALLER (Fixes 404 & REST Endpoint Format)
@@ -118,8 +122,19 @@ async function callGeminiRestApi(prompt: string): Promise<string> {
           console.warn(`⚠️ Gemini API call failed [model: ${model}, status: ${response.status}]:`, errText);
           lastError = new Error(`Model ${model} - Status ${response.status}: ${errText}`);
 
-          // 429 (rate limit) / 403 (bad key) -> try next key on this same model first
-          if (response.status === 429 || response.status === 403) {
+          // 429 with a project-level "limit: 0" quota (Workspace/no-billing accounts)
+          // means retrying the SAME model with a different key/attempt is pointless —
+          // move straight to the next model, which may have its own quota bucket.
+          if (response.status === 429) {
+            if (errText.includes('"limit": 0') || errText.includes('limit: 0')) {
+              break; // go to next model immediately, don't burn more quota here
+            }
+            rotateKey();
+            continue;
+          }
+
+          // 403 -> bad/invalid key, try next key on this same model
+          if (response.status === 403) {
             rotateKey();
             continue;
           }
