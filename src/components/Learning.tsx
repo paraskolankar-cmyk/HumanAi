@@ -21,36 +21,23 @@ import {
   Calendar
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getSelectedLanguageName } from '../services/geminiService';
+import { humanAiService, getSelectedLanguageName } from '../services/geminiService';
 
 const ICON_MAP: Record<string, any> = {
   Book, Type, Mic2, FileText, Hash, Layers, Clock, User, Sparkles, BrainCircuit
 };
 
-// NOTE: `id` here now doubles as the `topic` query param sent to
-// /api/learning/content and /api/learning/test — these must match the
-// TOPIC_LABELS keys used in those two API files exactly.
 const MODULES = [
   { id: 'vocabulary', title: 'Vocabulary', icon: 'Book', color: 'bg-blue-50 text-blue-600', description: 'Learn 10 essential words daily with meanings & native translation.' },
-  { id: 'grammar_essentials', title: 'Grammar Essentials', icon: 'Type', color: 'bg-purple-50 text-purple-600', description: 'Master foundational English grammar rules.' },
-  { id: 'tenses_structure', title: 'Tenses & Structure', icon: 'Clock', color: 'bg-orange-50 text-orange-600', description: 'Daily tense formulas, rules and sentence transformations.' },
-  { id: 'synonyms_antonyms', title: 'Synonyms & Antonyms', icon: 'Layers', color: 'bg-emerald-50 text-emerald-600', description: 'Learn daily opposite & similar word pairs.' },
-  { id: 'noun_pronoun', title: 'Noun & Pronoun', icon: 'User', color: 'bg-pink-50 text-pink-600', description: 'Learn nouns and pronouns with clear examples.' },
+  { id: 'grammar', title: 'Grammar Essentials', icon: 'Type', color: 'bg-purple-50 text-purple-600', description: 'Master foundational English grammar rules.' },
+  { id: 'tenses', title: 'Tenses & Structure', icon: 'Clock', color: 'bg-orange-50 text-orange-600', description: 'Daily tense formulas, rules and sentence transformations.' },
+  { id: 'syno-anto', title: 'Synonyms & Antonyms', icon: 'Layers', color: 'bg-emerald-50 text-emerald-600', description: 'Learn daily opposite & similar word pairs.' },
+  { id: 'noun-pronoun', title: 'Noun & Pronoun', icon: 'User', color: 'bg-pink-50 text-pink-600', description: 'Learn nouns and pronouns with clear examples.' },
   { id: 'verbs', title: 'Verbs (V1 - V4)', icon: 'Mic2', color: 'bg-indigo-50 text-indigo-600', description: 'Master daily verbs in all 4 forms with examples.' },
-  { id: 'voice_narration', title: 'Voice & Narration', icon: 'Hash', color: 'bg-red-50 text-red-600', description: 'Master Active/Passive voice and Direct/Indirect speech.' },
-  { id: 'advanced_grammar', title: 'Advanced Grammar', icon: 'Sparkles', color: 'bg-yellow-50 text-yellow-600', description: 'Adjectives, Conjunctions, Articles & Prepositions.' },
-  { id: 'expert_grammar', title: 'Expert Grammar', icon: 'BrainCircuit', color: 'bg-orange-50 text-orange-600', description: 'Infinitive, Participle, Inversion & Mood.' },
+  { id: 'voice-narration', title: 'Voice & Narration', icon: 'Hash', color: 'bg-red-50 text-red-600', description: 'Master Active/Passive voice and Direct/Indirect speech.' },
+  { id: 'other-pos', title: 'Advanced Grammar', icon: 'Sparkles', color: 'bg-yellow-50 text-yellow-600', description: 'Adjectives, Conjunctions, Articles & Prepositions.' },
+  { id: 'expert-grammar', title: 'Expert Grammar', icon: 'BrainCircuit', color: 'bg-orange-50 text-orange-600', description: 'Infinitive, Participle, Inversion & Mood.' },
 ];
-
-const TOTAL_DAYS = 90;
-
-interface TestQuestion {
-  id: number;
-  question: string;
-  options: string[];
-  correctAnswer: string;
-  explanation: string;
-}
 
 interface LearningProps {
   isDarkMode?: boolean;
@@ -65,10 +52,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
   const [selectedModule, setSelectedModule] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [content, setContent] = useState<any>(null);
-  const [testData, setTestData] = useState<{ questions: TestQuestion[] } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingTest, setIsLoadingTest] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
@@ -100,14 +84,12 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
   const handleSelectModule = (moduleId: string) => {
     setSelectedModule(moduleId);
     setContent(null);
-    setTestData(null);
     setHasReadContent(false);
     setIsLessonFinished(false);
     setCurrentQuestionIndex(0);
     setScore(0);
     setSelectedAnswer(null);
     setShowExplanation(false);
-    setLoadError(null);
   };
 
   useEffect(() => {
@@ -116,13 +98,6 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     }
   }, [selectedModule, selectedDay]);
 
-  /**
-   * Fetches lesson content from the CACHED backend endpoint instead of
-   * calling Gemini directly from the client on every visit. The first
-   * user to open a given day+topic combination triggers generation
-   * (server-side, one time); every user after that gets the cached
-   * version from Turso — no AI call, no API key exposed to the browser.
-   */
   const fetchDailyContent = async (dayNum: number = 1) => {
     if (!selectedModule) return;
 
@@ -137,69 +112,69 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     }
 
     setIsLoading(true);
-    setLoadError(null);
     try {
-      const response = await fetch(`/api/learning/content?day=${dayNum}&topic=${selectedModule}`);
-      if (!response.ok) {
-        throw new Error(`Content fetch failed: ${response.status}`);
+      let category = selectedModule;
+      if (selectedModule === 'syno-anto') category = 'Synonyms & Antonyms';
+      if (selectedModule === 'noun-pronoun') category = 'Noun & Pronoun';
+      if (selectedModule === 'verbs') category = 'Verbs';
+      if (selectedModule === 'voice-narration') category = 'Voice & Narration';
+      if (selectedModule === 'other-pos') category = 'Other Parts of Speech';
+      if (selectedModule === 'expert-grammar') category = 'Expert Grammar';
+
+      const data = await humanAiService.getDailyLearningContent(category!, userLevel, dayNum, nativeLanguage);
+      
+      if (data) {
+        setContent(data);
+      } else {
+        throw new Error("Invalid Content Returned");
       }
-      const data = await response.json();
-      setContent(data);
     } catch (error) {
-      console.error('Failed to fetch daily content:', error);
-      setLoadError("Aaj ka lesson load nahi ho paaya. Please thodi der baad phir try karo.");
-      setContent(null);
+      console.error('Failed to fetch daily content, using fallback structure', error);
+      
+      const fallbackContent = {
+        topic: `Day ${dayNum}: ${selectedModule.toUpperCase()} Lesson`,
+        explanation: `Today's lesson focuses on core principles of ${selectedModule} tailored for ${userLevel} level.`,
+        explanationTranslation: `Aaj ka yah path ${selectedModule} ke mukhya niyamo par aadharit hai.`,
+        vocabulary: selectedModule === 'vocabulary' ? [
+          { word: "Achieve", meaning: "To accomplish or reach a goal successfully", translation: "Praapt karna / Safal hona", example: "She worked hard to achieve her dreams." },
+          { word: "Fluent", meaning: "Able to express oneself easily and articulately", translation: "Dhaarapravaah bolne yogya", example: "He is fluent in English conversation." },
+          { word: "Confidence", meaning: "A feeling of self-assurance", translation: "Aatmavishvaas", example: "Practice daily to boost your confidence." }
+        ] : undefined,
+        verbs: selectedModule === 'verbs' ? [
+          { v1: "Speak", v2: "Spoke", v3: "Spoken", v4: "Speaking", translation: "Bolna", example: "I speak English fluently." },
+          { v1: "Learn", v2: "Learnt", v3: "Learnt", v4: "Learning", translation: "Seekhna", example: "She is learning grammar." }
+        ] : undefined,
+        examples: [
+          { english: "Consistency is key to mastering English.", translation: "Angrezi seekhne ke liye nirantar abhyaas zaroori hai." }
+        ],
+        questions: [
+          {
+            question: `Which option accurately applies to today's ${selectedModule} topic?`,
+            translation: "Kaun sa vikalp sahi hai?",
+            options: ["Correct Option", "Incorrect Option 1", "Incorrect Option 2", "Incorrect Option 3"],
+            answer: "Correct Option",
+            explanation: "This is the grammatically correct choice."
+          }
+        ]
+      };
+      setContent(fallbackContent);
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * Fetches today's test — same cached pattern. Only called once the user
-   * clicks "Start Practice Quiz", so we don't waste a generation call for
-   * people who read the lesson but never take the test.
-   */
-  const fetchDailyTest = async () => {
-    if (!selectedModule) return null;
-
-    setIsLoadingTest(true);
-    setLoadError(null);
-    try {
-      const response = await fetch(`/api/learning/test?day=${selectedDay}&topic=${selectedModule}`);
-      if (!response.ok) {
-        throw new Error(`Test fetch failed: ${response.status}`);
-      }
-      const data = await response.json();
-      setTestData(data);
-      return data;
-    } catch (error) {
-      console.error('Failed to fetch daily test:', error);
-      setLoadError("Test load nahi ho paaya. Please thodi der baad phir try karo.");
-      return null;
-    } finally {
-      setIsLoadingTest(false);
-    }
-  };
-
-  const handleStartQuiz = async () => {
-    const data = await fetchDailyTest();
-    if (data && data.questions && data.questions.length > 0) {
-      setHasReadContent(true);
-    }
-  };
-
   const handleAnswerSelect = (answer: string) => {
-    if (showExplanation || !testData?.questions) return;
+    if (showExplanation || !content?.questions) return;
     setSelectedAnswer(answer);
     setShowExplanation(true);
-    if (answer === testData.questions[currentQuestionIndex]?.correctAnswer) {
+    if (answer === content.questions[currentQuestionIndex]?.answer) {
       setScore(prev => prev + 1);
     }
   };
 
   // SIRF ACTIVE/SELECTED MODULE KO HI COMPLETED MARK KAREIN
   const nextQuestion = () => {
-    if (testData?.questions && currentQuestionIndex < testData.questions.length - 1) {
+    if (content?.questions && currentQuestionIndex < content.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
       setSelectedAnswer(null);
       setShowExplanation(false);
@@ -238,28 +213,6 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
-  if (loadError && !content) {
-    return (
-      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center px-4">
-        <AlertCircle size={48} className="text-red-400" />
-        <h3 className="font-bold text-[#111827] dark:text-white text-xl">Kuch गलत हो गया</h3>
-        <p className="text-sm text-[#6B7280] dark:text-gray-400 max-w-md">{loadError}</p>
-        <button
-          onClick={() => fetchDailyContent(selectedDay)}
-          className="mt-2 bg-[#4F46E5] text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-600 transition-all"
-        >
-          Retry
-        </button>
-        <button
-          onClick={() => { setSelectedModule(null); setContent(null); }}
-          className="text-[#6B7280] dark:text-gray-400 text-sm hover:underline"
-        >
-          Back to Learning Center
-        </button>
-      </div>
-    );
-  }
-
   if (selectedModule && content) {
     return (
       <motion.div 
@@ -280,12 +233,12 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
             Back to Learning Center
           </button>
 
-          {/* DAY SELECTOR BAR (1 to 90 Days) */}
+          {/* DAY SELECTOR BAR (1 to 30 Days) */}
           <div className="flex items-center gap-2 overflow-x-auto py-1.5 px-3 bg-gray-100 dark:bg-gray-800 rounded-2xl max-w-full">
             <Calendar size={16} className="text-indigo-600 dark:text-indigo-400 ml-1 shrink-0" />
             <span className="text-xs font-bold text-gray-500 uppercase pr-1 shrink-0">Day:</span>
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              {Array.from({ length: TOTAL_DAYS }).map((_, idx) => {
+              {Array.from({ length: 30 }).map((_, idx) => {
                 const d = idx + 1;
                 return (
                   <button
@@ -294,7 +247,6 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                       setSelectedDay(d);
                       setIsLessonFinished(false);
                       setHasReadContent(false);
-                      setTestData(null);
                     }}
                     className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                       selectedDay === d 
@@ -317,7 +269,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
           </div>
           <div>
             <h2 className="text-3xl font-bold text-[#111827] dark:text-white">{content.topic || `Day ${selectedDay} Lesson`}</h2>
-            <p className="text-sm text-[#6B7280] dark:text-gray-400 mt-1">Day {selectedDay} of {TOTAL_DAYS} • {userLevel} Level in {nativeLanguage}</p>
+            <p className="text-sm text-[#6B7280] dark:text-gray-400 mt-1">Day {selectedDay} • {userLevel} Level in {nativeLanguage}</p>
           </div>
         </div>
 
@@ -335,7 +287,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 <div className="space-y-4">
                   <h3 className="text-xl font-bold text-[#111827] dark:text-white flex items-center gap-2">
                     <FileText className="text-indigo-600 dark:text-indigo-400" size={20} />
-                    Concept Explanation
+                    Concept Explanation ({nativeLanguage})
                   </h3>
                   <div className="prose prose-indigo max-w-none space-y-3">
                     <p className="text-lg text-[#111827] dark:text-white leading-relaxed">{content.explanation}</p>
@@ -459,36 +411,23 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               )}
 
               {/* Start Quiz Action Button */}
-              <div className="flex flex-col items-center gap-3 pt-6 border-t border-gray-100 dark:border-gray-800">
-                {loadError && (
-                  <p className="text-sm text-red-500 font-medium">{loadError}</p>
-                )}
+              <div className="flex justify-center pt-6 border-t border-gray-100 dark:border-gray-800">
                 <button 
-                  onClick={handleStartQuiz}
-                  disabled={isLoadingTest}
-                  className="bg-[#4F46E5] text-white px-12 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-600 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60"
+                  onClick={() => setHasReadContent(true)}
+                  className="bg-[#4F46E5] text-white px-12 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-600 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  {isLoadingTest ? (
-                    <>
-                      <Loader2 size={20} className="animate-spin" />
-                      Preparing Test...
-                    </>
-                  ) : (
-                    <>
-                      Start Practice Quiz (10 Questions)
-                      <ChevronRight size={20} />
-                    </>
-                  )}
+                  Start Practice Quiz ({content.questions?.length || 5} Questions)
+                  <ChevronRight size={20} />
                 </button>
               </div>
             </div>
           </motion.div>
-        ) : !isLessonFinished && testData?.questions && testData.questions.length > 0 ? (
+        ) : !isLessonFinished && content.questions && content.questions.length > 0 ? (
           
           /* 2. PRACTICE QUIZ VIEW */
           <div className="space-y-6">
             <div className="flex items-center justify-between px-4">
-              <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400">Question {currentQuestionIndex + 1} of {testData.questions.length}</span>
+              <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400">Question {currentQuestionIndex + 1} of {content.questions.length}</span>
               <div className="flex items-center gap-2">
                 <Trophy size={18} className="text-yellow-500" />
                 <span className="text-sm font-bold text-gray-700 dark:text-gray-300">Score: {score}</span>
@@ -499,7 +438,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               <motion.div 
                 className="h-full bg-[#4F46E5] dark:bg-indigo-400"
                 initial={{ width: 0 }}
-                animate={{ width: `${((currentQuestionIndex + 1) / testData.questions.length) * 100}%` }}
+                animate={{ width: `${((currentQuestionIndex + 1) / content.questions.length) * 100}%` }}
               />
             </div>
 
@@ -510,12 +449,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
               className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-8 space-y-8 shadow-sm"
             >
               <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{testData.questions[currentQuestionIndex].question}</h3>
+                <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{content.questions[currentQuestionIndex].question}</h3>
+                {content.questions[currentQuestionIndex].translation && (
+                  <p className="text-lg text-[#6B7280] dark:text-gray-400 italic">{content.questions[currentQuestionIndex].translation}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 gap-4">
-                {testData.questions[currentQuestionIndex].options.map((opt: string, i: number) => {
-                  const isCorrect = opt === testData.questions[currentQuestionIndex].correctAnswer;
+                {content.questions[currentQuestionIndex].options.map((opt: string, i: number) => {
+                  const isCorrect = opt === content.questions[currentQuestionIndex].answer;
                   const isSelected = opt === selectedAnswer;
                   
                   let buttonClass = "border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-gray-700 dark:text-gray-300";
@@ -546,15 +488,15 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
                 <motion.div 
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className={`p-6 rounded-2xl border ${selectedAnswer === testData.questions[currentQuestionIndex].correctAnswer ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/30' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30'}`}
+                  className={`p-6 rounded-2xl border ${selectedAnswer === content.questions[currentQuestionIndex].answer ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/30' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30'}`}
                 >
-                  <p className="font-bold mb-2 text-[#111827] dark:text-white">Explanation:</p>
-                  <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">{testData.questions[currentQuestionIndex].explanation}</p>
+                  <p className="font-bold mb-2 text-[#111827] dark:text-white">Explanation ({nativeLanguage}):</p>
+                  <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">{content.questions[currentQuestionIndex].explanation}</p>
                   <button 
                     onClick={nextQuestion}
                     className="mt-6 w-full bg-[#111827] dark:bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-black dark:hover:bg-indigo-700 transition-colors cursor-pointer"
                   >
-                    {currentQuestionIndex === testData.questions.length - 1 ? 'Finish Lesson' : 'Next Question'}
+                    {currentQuestionIndex === content.questions.length - 1 ? 'Finish Lesson' : 'Next Question'}
                   </button>
                 </motion.div>
               )}
@@ -572,11 +514,11 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
             </div>
             <div className="space-y-2">
               <h2 className="text-3xl font-bold text-[#111827] dark:text-white">Day {selectedDay} Lesson Complete!</h2>
-              <p className="text-[#6B7280] dark:text-gray-400 text-lg">You scored {score} out of {testData?.questions?.length || 0} in today's {MODULES.find(m => m.id === selectedModule)?.title} practice.</p>
+              <p className="text-[#6B7280] dark:text-gray-400 text-lg">You scored {score} out of {content.questions?.length || 0} in today's {selectedModule} practice.</p>
             </div>
             <div className="bg-indigo-50 dark:bg-indigo-900/20 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 inline-block">
               <p className="text-[#4F46E5] dark:text-indigo-400 font-bold">Progress Saved!</p>
-              <p className="text-sm text-indigo-400 dark:text-indigo-300">Proceed to Day {selectedDay < TOTAL_DAYS ? selectedDay + 1 : 1} for new material.</p>
+              <p className="text-sm text-indigo-400 dark:text-indigo-300">Proceed to Day {selectedDay < 30 ? selectedDay + 1 : 1} for new material.</p>
             </div>
             <div className="pt-6">
               <button 
@@ -601,7 +543,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-[#111827] dark:text-white">Learning Center</h2>
-          <p className="text-[#6B7280] dark:text-gray-400">Master English fundamentals with a 90-day roadmap, daily lessons and real exam-style tests.</p>
+          <p className="text-[#6B7280] dark:text-gray-400">Master English fundamentals with daily AI-powered lessons in {nativeLanguage}.</p>
         </div>
         <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 px-4 py-2 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
           <CheckCircle2 size={18} />
@@ -653,7 +595,7 @@ export default function Learning({ isDarkMode, onThemeToggle, userEmail, userNam
           <div className="inline-flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
             Daily Progress
           </div>
-          <h3 className="text-3xl font-bold">Your 90-Day Learning Journey</h3>
+          <h3 className="text-3xl font-bold">Your Learning Journey</h3>
           <p className="text-gray-400 max-w-md">
             Complete your daily modules to unlock advanced lessons and earn badges.
           </p>
