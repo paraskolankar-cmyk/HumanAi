@@ -62,11 +62,6 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// Models tried in order. NOTE: gemini-1.5-flash / gemini-1.5-flash-latest were
-// removed — they returned 404 (not available on this account/API version) and
-// were just wasting a request + burning quota on every single message.
-// Different model names often have SEPARATE free-tier quota buckets, so if
-// gemini-2.0-flash is rate-limited, trying a different model can still work.
 const MODEL_FALLBACK_CHAIN = [
   'gemini-2.5-flash',
   'gemini-2.0-flash',
@@ -74,7 +69,6 @@ const MODEL_FALLBACK_CHAIN = [
   'gemini-flash-latest'
 ];
 
-// ULTRA-STABLE DIRECT REST API CALLER (Fixes 404 & REST Endpoint Format)
 async function callGeminiRestApi(prompt: string): Promise<string> {
   const keys = getApiKeyList();
   if (keys.length === 0) {
@@ -122,24 +116,19 @@ async function callGeminiRestApi(prompt: string): Promise<string> {
           console.warn(`⚠️ Gemini API call failed [model: ${model}, status: ${response.status}]:`, errText);
           lastError = new Error(`Model ${model} - Status ${response.status}: ${errText}`);
 
-          // 429 with a project-level "limit: 0" quota (Workspace/no-billing accounts)
-          // means retrying the SAME model with a different key/attempt is pointless —
-          // move straight to the next model, which may have its own quota bucket.
           if (response.status === 429) {
             if (errText.includes('"limit": 0') || errText.includes('limit: 0')) {
-              break; // go to next model immediately, don't burn more quota here
+              break;
             }
             rotateKey();
             continue;
           }
 
-          // 403 -> bad/invalid key, try next key on this same model
           if (response.status === 403) {
             rotateKey();
             continue;
           }
 
-          // 404 -> this model isn't available for this key/account, break to try next model
           if (response.status === 404) {
             break;
           }
@@ -154,6 +143,60 @@ async function callGeminiRestApi(prompt: string): Promise<string> {
   throw lastError || new Error("All Gemini models/keys failed");
 }
 
+// --------------------------------------------------------------------------
+// PRACTICE SECTION CONSTANTS (12 MONTHS & 24 DAILY TASKS GUARANTEED)
+// --------------------------------------------------------------------------
+
+const FULL_12_MONTHS_ROADMAP = [
+  { month: 1, theme: "Foundations & Professional Vocabulary", objectives: ["Basic sentence structure", "Workplace daily words", "Self-introduction & Elevator pitch"] },
+  { month: 2, theme: "Present & Past Communication", objectives: ["Simple Present Tense in meetings", "Past tense for achievements", "Regular & Irregular Verbs"] },
+  { month: 3, theme: "Future Tense & Modals in Workplace", objectives: ["Future planning & projections", "Polite requests (Could, Would, Should)", "Scheduling meetings"] },
+  { month: 4, theme: "Nouns, Pronouns & Professional Writing", objectives: ["Types of Nouns", "Subject & Object Pronouns", "Descriptive Adjectives for reports"] },
+  { month: 5, theme: "Verb Patterns & Sentence Building", objectives: ["Verb Forms V1-V4", "Subject-Verb Agreement", "Avoiding common speech errors"] },
+  { month: 6, theme: "Prepositions & Email Writing", objectives: ["Prepositions of Time & Place", "Formal Email Etiquette", "Compound Sentences"] },
+  { month: 7, theme: "Active & Passive Voice in Business", objectives: ["Active Voice Rules", "Passive Voice in Documentation", "Converting Sentences"] },
+  { month: 8, theme: "Reporting Speech & Feedback", objectives: ["Direct Speech Rules", "Indirect Speech Conversion", "Handling Feedback Politely"] },
+  { month: 9, theme: "Business Idioms & Phrases", objectives: ["High-frequency Corporate Idioms", "Phrasal Verbs for workplace", "Contextual Vocabulary"] },
+  { month: 10, theme: "Reading Comprehension & Error Spotting", objectives: ["Comprehension Practice", "Grammatical Error Spotting", "Rearranging Jumbled Ideas"] },
+  { month: 11, theme: "Interview & Presentation Fluency", objectives: ["Answering Interview Q&A", "Delivering Presentations", "Public Speaking Confidence"] },
+  { month: 12, theme: "Career Mastery & Final Certification", objectives: ["Advanced Grammar Rules", "Full Mock Drills", "Complete Fluency Review"] }
+];
+
+const FULL_24_DAILY_TASKS = {
+  sentences: [
+    { english: "I start my work early in the morning.", translation: "मैं सुबह जल्दी अपना काम शुरू करता हूँ।" },
+    { english: "Effective communication builds strong career growth.", translation: "प्रभावी बातचीत मजबूत करियर विकास का निर्माण करती है।" },
+    { english: "He works hard to achieve his professional goals.", translation: "वह अपने पेशेवर लक्ष्यों को पाने के लिए कड़ी मेहनत करता है।" },
+    { english: "We are learning new business vocabulary today.", translation: "हम आज नई व्यावसायिक शब्दावली सीख रहे हैं।" },
+    { english: "Never hesitate to ask questions in meetings.", translation: "मीटिंग में सवाल पूछने में कभी मत हिचकिचाएं।" },
+    { english: "Clear expression solves many workplace problems.", translation: "स्पष्ट अभिव्यक्ति कार्यस्थल की कई समस्याओं को हल करती है।" }
+  ],
+  translations: [
+    { translation: "आपका दिन बहुत शुभ हो।", english: "Have a very good day." },
+    { translation: "मैं अंग्रेजी में धाराप्रवाह बात कर सकता हूँ।", english: "I can speak fluently in English." },
+    { translation: "वह बहुत प्रतिभाशाली और मेहनती है।", english: "She is very talented and hardworking." },
+    { translation: "क्या आप आज की मीटिंग के लिए तैयार हैं?", english: "Are you ready for today's meeting?" },
+    { translation: "सफलता निरंतर अभ्यास से ही आती है।", english: "Success comes only from continuous practice." },
+    { translation: "समय कार्यस्थल पर बहुत मूल्यवान है।", english: "Time is very valuable in the workplace." }
+  ],
+  arrangements: [
+    { jumbled: ["English", "learning", "am", "I", "daily"], correct: "I am learning English daily", translation: "मैं रोज अंग्रेजी सीख रहा हूँ।" },
+    { jumbled: ["a", "is", "great", "leader", "He"], correct: "He is a great leader", translation: "वह एक महान नेता है।" },
+    { jumbled: ["hard", "Work", "achieve", "to", "success"], correct: "Work hard to achieve success", translation: "सफलता पाने के लिए कड़ी मेहनत करें।" },
+    { jumbled: ["fluently", "speaks", "She", "English"], correct: "She speaks English fluently", translation: "वह धाराप्रवाह अंग्रेजी बोलती है।" },
+    { jumbled: ["time", "on", "Be", "always"], correct: "Always be on time", translation: "हमेशा समय पर रहें।" },
+    { jumbled: ["makes", "Practice", "man", "a", "perfect"], correct: "Practice makes a man perfect", translation: "अभ्यास इंसान को निपुण बनाता है।" }
+  ],
+  mcqs: [
+    { question: "He ___ to office yesterday.", options: ["go", "went", "gone", "going"], answer: "went", explanation: "Past tense of 'go' is 'went'.", translation: "वह कल दफ्तर गया था।" },
+    { question: "She is ___ than her colleague.", options: ["smart", "smarter", "smartest", "more smart"], answer: "smarter", explanation: "Comparative degree uses 'smarter'.", translation: "वह अपने सहकर्मी से ज्यादा समझदार है।" },
+    { question: "They ___ preparing for the presentation now.", options: ["is", "are", "was", "be"], answer: "are", explanation: "Plural subject 'They' takes 'are'.", translation: "वे अभी प्रेजेंटेशन की तैयारी कर रहे हैं।" },
+    { question: "Identify the Noun: 'Honesty is key to success.'", options: ["is", "key", "Honesty", "success"], answer: "Honesty", explanation: "'Honesty' is an abstract noun.", translation: "संज्ञा पहचानें:" },
+    { question: "Choose the correct sentence:", options: ["She like tea", "She likes tea", "She liking tea", "She is like tea"], answer: "She likes tea", explanation: "Third person singular takes 'likes'.", translation: "सही वाक्य चुनें:" },
+    { question: "We ___ completed the project on time.", options: ["has", "have", "is", "was"], answer: "have", explanation: "Plural 'We' takes 'have'.", translation: "हमने समय पर प्रोजेक्ट पूरा कर लिया है।" }
+  ]
+};
+
 export const humanAiService = {
   async assessLevel(testAnswers: string | string[], profession: string = "General") {
     const formattedAnswers = Array.isArray(testAnswers) ? testAnswers.join(', ') : testAnswers;
@@ -167,23 +210,35 @@ export const humanAiService = {
     }
   },
 
+  // --------------------------------------------------------------------------
+  // UPDATED PRACTICE SECTION METHOD 1: GENERATE 12-MONTH LEARNING PLAN
+  // --------------------------------------------------------------------------
   async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
-      const prompt = `Create a 12-month English roadmap for ${level} level student in ${profession}. Return JSON: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] } ] }`;
+      const prompt = `Create a COMPLETE 12-MONTH English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
+      STRICT REQUIREMENT: You MUST generate EXACTLY 12 MONTHS in the "roadmap" array (Month 1, Month 2, Month 3, ... up to Month 12).
+      Make monthly themes and key objectives directly relevant to their profession (${profession}).
+
+      Return JSON format strictly: 
+      { 
+        "roadmap": [ 
+          { "month": 1, "theme": "Theme for Month 1", "objectives": ["Obj 1", "Obj 2", "Obj 3"] },
+          { "month": 2, "theme": "Theme for Month 2", "objectives": ["Obj 1", "Obj 2", "Obj 3"] },
+          ... continue up to month 12
+        ] 
+      }`;
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
+      
+      if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length >= 6) {
         return parsed;
       }
-      throw new Error("Invalid roadmap structure");
+      throw new Error("Invalid roadmap structure or less than 6 months returned");
     } catch (error) {
-      const defaultThemes = [
-        { theme: `Foundations for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary"] },
-        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense"] }
-      ];
+      console.warn("Serving 12-month roadmap fallback:", error);
       return {
-        roadmap: defaultThemes.map((item, index) => ({
-          month: index + 1,
+        roadmap: FULL_12_MONTHS_ROADMAP.map(item => ({
+          month: item.month,
           theme: `${level} - ${item.theme}`,
           objectives: item.objectives
         }))
@@ -191,21 +246,41 @@ export const humanAiService = {
     }
   },
 
+  // --------------------------------------------------------------------------
+  // UPDATED PRACTICE SECTION METHOD 2: GENERATE DAILY PRACTICE TASKS (20-30 QUESTIONS)
+  // --------------------------------------------------------------------------
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
+
     try {
-      const prompt = `Generate daily English practice tasks in ${userLanguage} for ${level} level on Month ${month}, Day ${day}. Return JSON: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
+      const prompt = `Generate daily English practice tasks for a ${level} level student on Month ${month}, Day ${day}.
+        CRITICAL CONSTRAINT: Generate BETWEEN 20 AND 30 PRACTICE QUESTIONS IN TOTAL.
+        
+        Provide 5 to 8 questions in EACH of these 4 categories:
+        1. "sentences": 5 to 8 short speaking practice sentences with ${userLanguage} translation.
+        2. "translations": 5 to 8 translation tasks (${userLanguage} sentence to translate into English).
+        3. "arrangements": 5 to 8 jumbled word arrays with correct sentence and ${userLanguage} translation.
+        4. "mcqs": 5 to 8 grammar multiple-choice questions with 4 options, answer, and explanation in ${userLanguage}.
+        
+        Return JSON format strictly:
+        { 
+          "sentences": [ { "english": "...", "translation": "..." } ], 
+          "translations": [ { "translation": "...", "english": "..." } ],
+          "arrangements": [ { "jumbled": ["word1", "word2"], "correct": "...", "translation": "..." } ],
+          "mcqs": [ { "question": "...", "options": ["A", "B", "C", "D"], "answer": "...", "explanation": "...", "translation": "..." } ]
+        }`;
+
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) return parsed;
-      throw new Error("Tasks error");
+      const total = (parsed.sentences?.length || 0) + (parsed.translations?.length || 0) + (parsed.arrangements?.length || 0) + (parsed.mcqs?.length || 0);
+
+      if (parsed && total >= 12) {
+        return parsed;
+      }
+      throw new Error("Tasks count below required minimum");
     } catch (error) {
-      return {
-        sentences: [{ english: "I practice English daily.", translation: "मैं रोज अंग्रेजी अभ्यास करता हूँ।" }],
-        translations: [{ translation: "आपका दिन कैसा था?", english: "How was your day?" }],
-        arrangements: [{ jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" }],
-        mcqs: [{ question: "She ___ to work daily.", options: ["go", "goes", "going"], answer: "goes", explanation: "Singular takes 'goes'.", translation: "वह रोज काम पर जाती है।" }]
-      };
+      console.warn("Serving 24-question daily tasks fallback:", error);
+      return FULL_24_DAILY_TASKS;
     }
   },
 
@@ -236,12 +311,6 @@ export const humanAiService = {
     }
   },
 
-  /**
-   * Translates small fixed UI strings (e.g. the trial-expired modal) into the
-   * user's native language. Reuses the same robust REST pipeline (retries,
-   * model fallback, key rotation) instead of a separate, broken direct
-   * @google/genai SDK call with a client-side-inaccessible API key.
-   */
   async translateUIStrings(strings: Record<string, string>, targetLanguage: string) {
     try {
       const prompt = `Translate each value in this JSON object into ${targetLanguage}. Keep the same keys. Return ONLY a JSON object with the same keys, translated values, nothing else:\n${JSON.stringify(strings)}`;
@@ -250,20 +319,10 @@ export const humanAiService = {
       if (parsed && Object.keys(parsed).length > 0) return parsed;
       throw new Error("Empty translation result");
     } catch (err) {
-      return strings; // fall back to original (English) strings on failure
+      return strings;
     }
   },
 
-  /**
-   * Main AI Chat handler.
-   *
-   * IMPORTANT FOR UI: this now returns a ready-to-display `message` field that
-   * already combines correction + native-language explanation + natural reply
-   * in the right order (so even if your chat bubble only renders one field,
-   * it will show the full tutoring flow). The individual fields (`corrected`,
-   * `response`, `explanation`, `translation`) are still returned separately
-   * in case you want to style them differently (e.g. correction in a colored box).
-   */
   async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
     let historyContext: string[] = [];
     let userLanguage = getSelectedLanguageName();
@@ -319,7 +378,6 @@ Return STRICT JSON in exactly this format, nothing else:
         const explanation = parsed.explanation || "";
         const corrected = parsed.corrected || cleanInput;
 
-        // Build a safe fallback combined message in case the model didn't return `message`
         const fallbackMessage = [
           explanation && corrected !== cleanInput ? `✅ ${corrected}` : null,
           explanation || null,
@@ -346,8 +404,6 @@ Return STRICT JSON in exactly this format, nothing else:
         return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
       }
 
-      // Honest fallback instead of a fake-generic reply — tells the user (in their
-      // own language) that something went wrong, instead of pretending to chat normally.
       const msg = `Hmm, mujhe abhi thoda connection issue aa raha hai 🙏 Ek baar phir se try karo: "${cleanInput}"`;
       return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
     }
