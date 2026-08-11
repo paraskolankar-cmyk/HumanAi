@@ -62,11 +62,11 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
+// Officially supported Google Gemini REST API endpoints
 const MODEL_FALLBACK_CHAIN = [
-  'gemini-2.5-flash',
+  'gemini-1.5-flash',
   'gemini-2.0-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-flash-latest'
+  'gemini-1.5-pro'
 ];
 
 async function callGeminiRestApi(prompt: string): Promise<string> {
@@ -91,7 +91,7 @@ async function callGeminiRestApi(prompt: string): Promise<string> {
           }
         ],
         generationConfig: {
-          temperature: 0.9,
+          temperature: 0.7,
           topP: 0.95,
           responseMimeType: "application/json"
         }
@@ -210,9 +210,6 @@ export const humanAiService = {
     }
   },
 
-  // --------------------------------------------------------------------------
-  // UPDATED PRACTICE SECTION METHOD 1: GENERATE 12-MONTH LEARNING PLAN
-  // --------------------------------------------------------------------------
   async generateLearningPlan(level: string, profession: string = "General Professional") {
     try {
       const prompt = `Create a COMPLETE 12-MONTH English learning roadmap tailored for a ${level} level student whose profession/goal is "${profession}". 
@@ -246,9 +243,6 @@ export const humanAiService = {
     }
   },
 
-  // --------------------------------------------------------------------------
-  // UPDATED PRACTICE SECTION METHOD 2: GENERATE DAILY PRACTICE TASKS (20-30 QUESTIONS)
-  // --------------------------------------------------------------------------
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
 
@@ -345,7 +339,7 @@ export const humanAiService = {
 
       const prompt = `You are HumnAi — a warm, witty, human-like English speaking partner chatting on WhatsApp with a ${userLanguage}-speaking learner. You are NOT a robot and must never sound scripted or repeat the same phrasing across turns. Vary your vocabulary, tone, and sentence structure every single time.
 
-Session Seed (ignore this number, just use it to make sure you vary your reply): ${seed}
+Session Seed: ${seed}
 
 ${historyPrompt}
 USER'S LATEST MESSAGE: "${cleanInput}"
