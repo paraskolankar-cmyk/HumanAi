@@ -62,16 +62,20 @@ export function safeJsonParse(text: string | undefined): any {
   }
 }
 
-// Models tried in order. NOTE: gemini-1.5-flash / gemini-1.5-flash-latest were
-// removed — they returned 404 (not available on this account/API version) and
-// were just wasting a request + burning quota on every single message.
-// Different model names often have SEPARATE free-tier quota buckets, so if
-// gemini-2.0-flash is rate-limited, trying a different model can still work.
+// Models tried in order.
+//
+// FIX (Aug 2026): version-pinned names like 'gemini-2.5-flash',
+// 'gemini-2.0-flash' and 'gemini-2.5-flash-lite' were returning 404 for this
+// account/API version — Gemini 2.0 Flash / Flash-Lite have been retired by
+// Google, and pinned 2.5 names aren't guaranteed to exist on every key/region.
+// Only the *rolling alias* names (which Google keeps pointed at whatever the
+// current best available model is) reliably resolve, so we now only use
+// those. This also means there's just ONE quota bucket in practice, so the
+// old "try 4 model names to dodge quota" trick no longer helps and mostly
+// just burned through the 20-requests/day free-tier limit for nothing.
 const MODEL_FALLBACK_CHAIN = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-flash-latest'
+  'gemini-flash-latest',
+  'gemini-pro-latest'
 ];
 
 // ULTRA-STABLE DIRECT REST API CALLER (Fixes 404 & REST Endpoint Format)
@@ -168,18 +172,48 @@ export const humanAiService = {
   },
 
   async generateLearningPlan(level: string, profession: string = "General Professional") {
+    // FIX: cache the roadmap per level+profession. Previously this had NO
+    // cache at all, so every time a user opened Practice it fired a fresh
+    // API call — one of the things burning through the 20/day free quota.
+    const cacheKey = `humnai_cache_roadmap_${level.toLowerCase()}_${profession.toLowerCase().replace(/\s+/g, '_')}`;
+
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length >= 12) return parsed;
+        } catch (e) {}
+      }
+    }
+
     try {
-      const prompt = `Create a 12-month English roadmap for ${level} level student in ${profession}. Return JSON: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] } ] }`;
+      const prompt = `Create a COMPLETE 12-month English roadmap for a ${level} level student working as ${profession}. You MUST return exactly 12 entries, one per month, month 1 through month 12 — never fewer. Return JSON only: { "roadmap": [ { "month": 1, "theme": "", "objectives": [] }, ... all the way to month 12 ] }`;
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length > 0) {
+      if (parsed && Array.isArray(parsed.roadmap) && parsed.roadmap.length >= 12) {
+        if (typeof window !== 'undefined') {
+          try { localStorage.setItem(cacheKey, JSON.stringify(parsed)); } catch (e) {}
+        }
         return parsed;
       }
-      throw new Error("Invalid roadmap structure");
+      throw new Error("Invalid or incomplete roadmap structure");
     } catch (error) {
+      // FIX: fallback used to only cover 2 months. Now covers all 12 so a
+      // failed/quota-exhausted API call doesn't visibly truncate the plan.
       const defaultThemes = [
         { theme: `Foundations for ${profession}`, objectives: ["Core sentence structure", "Essential workplace vocabulary"] },
-        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense"] }
+        { theme: "Present & Past Tenses", objectives: ["Simple Present Tense", "Simple Past Tense"] },
+        { theme: "Future Tense & Planning", objectives: ["Future forms (will/going to)", "Making plans and predictions"] },
+        { theme: "Workplace Communication", objectives: ["Emails and messages", "Meeting phrases"] },
+        { theme: "Questions & Requests", objectives: ["Forming questions", "Polite requests"] },
+        { theme: "Describing People & Things", objectives: ["Adjectives and comparisons", "Describing appearance and character"] },
+        { theme: "Conversations & Small Talk", objectives: ["Starting conversations", "Common idioms"] },
+        { theme: "Phone & Video Calls", objectives: ["Call etiquette phrases", "Clarifying and confirming"] },
+        { theme: "Presentations & Explaining Ideas", objectives: ["Structuring a talk", "Explaining processes"] },
+        { theme: "Problem Solving & Opinions", objectives: ["Expressing opinions", "Agreeing and disagreeing"] },
+        { theme: "Advanced Grammar Review", objectives: ["Modal verbs", "Conditionals"] },
+        { theme: "Fluency & Confidence Building", objectives: ["Spontaneous speaking practice", "Review of all key topics"] }
       ];
       return {
         roadmap: defaultThemes.map((item, index) => ({
@@ -193,18 +227,59 @@ export const humanAiService = {
 
   async generateDailyTasks(level: string, month: number, day: number, targetLanguage?: string) {
     const userLanguage = targetLanguage || getSelectedLanguageName();
+    // FIX: cache per level+month+day+language. This had no cache before, so
+    // re-opening the same day's practice re-called the API every time.
+    const cacheKey = `humnai_cache_tasks_${level.toLowerCase()}_m${month}_d${day}_${userLanguage.toLowerCase()}`;
+
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) return parsed;
+        } catch (e) {}
+      }
+    }
+
     try {
-      const prompt = `Generate daily English practice tasks in ${userLanguage} for ${level} level on Month ${month}, Day ${day}. Return JSON: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
+      const prompt = `Generate a FULL day of English practice tasks in ${userLanguage} for a ${level} level student on Month ${month}, Day ${day}. Include at least 4 sentences, 4 translations, 4 arrangements, and 4 mcqs (16 items total). Return JSON only: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
-      if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) return parsed;
+      if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) {
+        if (typeof window !== 'undefined') {
+          try { localStorage.setItem(cacheKey, JSON.stringify(parsed)); } catch (e) {}
+        }
+        return parsed;
+      }
       throw new Error("Tasks error");
     } catch (error) {
+      // FIX: fallback used to only have 1 item per category (4 total).
+      // Now has 4 per category (16 total) matching the real expected count.
       return {
-        sentences: [{ english: "I practice English daily.", translation: "मैं रोज अंग्रेजी अभ्यास करता हूँ।" }],
-        translations: [{ translation: "आपका दिन कैसा था?", english: "How was your day?" }],
-        arrangements: [{ jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" }],
-        mcqs: [{ question: "She ___ to work daily.", options: ["go", "goes", "going"], answer: "goes", explanation: "Singular takes 'goes'.", translation: "वह रोज काम पर जाती है।" }]
+        sentences: [
+          { english: "I practice English daily.", translation: "मैं रोज अंग्रेजी अभ्यास करता हूँ।" },
+          { english: "She works in an office.", translation: "वह एक ऑफिस में काम करती है।" },
+          { english: "We will meet tomorrow.", translation: "हम कल मिलेंगे।" },
+          { english: "He is learning new skills.", translation: "वह नए कौशल सीख रहा है।" }
+        ],
+        translations: [
+          { translation: "आपका दिन कैसा था?", english: "How was your day?" },
+          { translation: "मुझे यह पसंद है।", english: "I like this." },
+          { translation: "कृपया मेरी मदद करें।", english: "Please help me." },
+          { translation: "यह बहुत अच्छा है।", english: "This is very good." }
+        ],
+        arrangements: [
+          { jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" },
+          { jumbled: ["work", "I", "office", "in", "an"], correct: "I work in an office", translation: "मैं एक ऑफिस में काम करता हूँ।" },
+          { jumbled: ["today", "busy", "very", "is", "she"], correct: "She is very busy today", translation: "वह आज बहुत व्यस्त है।" },
+          { jumbled: ["tomorrow", "meeting", "a", "have", "we"], correct: "We have a meeting tomorrow", translation: "हमारी कल एक मीटिंग है।" }
+        ],
+        mcqs: [
+          { question: "She ___ to work daily.", options: ["go", "goes", "going"], answer: "goes", explanation: "Singular takes 'goes'.", translation: "वह रोज काम पर जाती है।" },
+          { question: "They ___ studying now.", options: ["is", "are", "am"], answer: "are", explanation: "'They' takes 'are'.", translation: "वे अभी पढ़ रहे हैं।" },
+          { question: "I ___ finished my work.", options: ["have", "has", "had"], answer: "have", explanation: "'I' takes 'have' in present perfect.", translation: "मैंने अपना काम पूरा कर लिया है।" },
+          { question: "He ___ to the gym every morning.", options: ["go", "goes", "went"], answer: "goes", explanation: "Present simple habit uses 'goes'.", translation: "वह हर सुबह जिम जाता है।" }
+        ]
       };
     }
   },
@@ -256,13 +331,6 @@ export const humanAiService = {
 
   /**
    * Main AI Chat handler.
-   *
-   * IMPORTANT FOR UI: this now returns a ready-to-display `message` field that
-   * already combines correction + native-language explanation + natural reply
-   * in the right order (so even if your chat bubble only renders one field,
-   * it will show the full tutoring flow). The individual fields (`corrected`,
-   * `response`, `explanation`, `translation`) are still returned separately
-   * in case you want to style them differently (e.g. correction in a colored box).
    */
   async correctSentence(sentence: string, historyContextOrLang?: string[] | string, targetLanguage?: string) {
     let historyContext: string[] = [];
@@ -319,7 +387,6 @@ Return STRICT JSON in exactly this format, nothing else:
         const explanation = parsed.explanation || "";
         const corrected = parsed.corrected || cleanInput;
 
-        // Build a safe fallback combined message in case the model didn't return `message`
         const fallbackMessage = [
           explanation && corrected !== cleanInput ? `✅ ${corrected}` : null,
           explanation || null,
@@ -346,8 +413,6 @@ Return STRICT JSON in exactly this format, nothing else:
         return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
       }
 
-      // Honest fallback instead of a fake-generic reply — tells the user (in their
-      // own language) that something went wrong, instead of pretending to chat normally.
       const msg = `Hmm, mujhe abhi thoda connection issue aa raha hai 🙏 Ek baar phir se try karo: "${cleanInput}"`;
       return { corrected: cleanInput, response: msg, translation: cleanInput, explanation: "", message: msg };
     }
