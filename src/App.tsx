@@ -139,6 +139,21 @@ export default function App() {
     checkTrial();
   }, [isAuthenticated, isPro, activeTab, trialTranslations, isTranslatingTrial]);
 
+  // FIX: this is the actual bug that showed the "Free Trial Expired" modal to
+  // Pro users. `isPro` starts from localStorage (which can be stale/false on
+  // first paint) and only gets confirmed a bit later, either from
+  // `dbService.getUser()` on mount or from the 8-second live-sync poll above.
+  // If the trial-check effect ran BEFORE that confirmation arrived and the
+  // 24-hour window had passed, it set `showTrialModal = true`. But nothing
+  // ever set it back to `false` once `isPro` later flipped to `true` -- so
+  // confirmed Pro users kept seeing an already-open modal forever. This
+  // effect closes it the moment Pro status is confirmed.
+  useEffect(() => {
+    if (isPro && showTrialModal) {
+      setShowTrialModal(false);
+    }
+  }, [isPro]);
+
   useEffect(() => {
     const savedTheme = localStorage.getItem('humnai_theme');
     if (savedTheme === 'dark') {
