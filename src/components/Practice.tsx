@@ -157,6 +157,11 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const recognitionRef = React.useRef<any>(null);
   const lastTranscriptRef = React.useRef<string>('');
 
+  // FIX (pregeneration): guards so we only ever kick off a background
+  // pregeneration run once per mount, instead of re-firing on every re-render
+  // or every time `roadmap`/`userLevel` happens to change.
+  const pregenStartedRef = useRef(false);
+
   const currentSubTask = dailyTasks ? (
     taskType === 'sentences' 
       ? dailyTasks.sentences?.[taskIndex] 
@@ -174,6 +179,28 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
       .replace(/\s+/g, " ");
   };
+
+  // FIX (pregeneration): for a RETURNING user who already has a roadmap and
+  // assessment completed (page refresh / re-visit), kick off background
+  // pregeneration once so any days that aren't cached yet (e.g. new months,
+  // or content added after this feature shipped) get filled in without the
+  // user ever seeing a loading spinner when they tap a day.
+  useEffect(() => {
+    if (
+      view === 'roadmap' &&
+      roadmap &&
+      roadmap.length > 0 &&
+      userLevel &&
+      !pregenStartedRef.current
+    ) {
+      pregenStartedRef.current = true;
+      // Fire and forget — do NOT await, this must never block the UI.
+      humanAiService
+        .pregenerateRoadmapTasks(userLevel, roadmap.length, 28, targetLanguage)
+        .catch((err) => console.warn('Background task pregeneration failed:', err));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, roadmap, userLevel]);
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -283,6 +310,18 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         localStorage.setItem('humnai_roadmap', JSON.stringify(finalPlan));
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
+
+        // FIX (pregeneration): the moment the roadmap exists, kick off
+        // background generation of EVERY day's tasks for the WHOLE roadmap
+        // (one API call per month, via generateMonthTasks under the hood —
+        // see geminiService.ts). Not awaited on purpose: the user should see
+        // the roadmap screen immediately, not wait for 12 months of content
+        // to finish generating. By the time they tap any day, it's already
+        // cached and opens instantly instead of showing a loading spinner.
+        pregenStartedRef.current = true;
+        humanAiService
+          .pregenerateRoadmapTasks(calculatedLevel, finalPlan.length, 28, targetLanguage)
+          .catch((err) => console.warn('Background task pregeneration failed:', err));
       } catch (error) {
         console.error("Assessment evaluation error", error);
         setUserLevel("Intermediate");
@@ -290,6 +329,11 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
+
+        pregenStartedRef.current = true;
+        humanAiService
+          .pregenerateRoadmapTasks("Intermediate", DEFAULT_ROADMAP.length, 28, targetLanguage)
+          .catch((err) => console.warn('Background task pregeneration failed:', err));
       } finally {
         setIsAssessing(false);
       }
@@ -323,6 +367,9 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setSelectedDay(day);
     setIsLoadingTasks(true);
     try {
+      // Note: generateDailyTasks checks localStorage cache FIRST (see
+      // geminiService.ts). If background pregeneration already ran for this
+      // day, this resolves instantly from cache with no network call.
       const tasks = await humanAiService.generateDailyTasks(userLevel || 'Beginner', month, day, targetLanguage);
       if (tasks && (tasks.sentences || tasks.mcqs)) {
         setDailyTasks(tasks);
