@@ -242,7 +242,9 @@ export const humanAiService = {
     }
 
     try {
-      const prompt = `Generate a FULL day of English practice tasks in ${userLanguage} for a ${level} level student on Month ${month}, Day ${day}. Include at least 4 sentences, 4 translations, 4 arrangements, and 4 mcqs (16 items total). Return JSON only: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
+      // FIX: bumped from 4 to 20-30 total questions per day (min 20, max 30),
+      // spread across all 4 categories so no single type dominates.
+      const prompt = `Generate a FULL day of English practice tasks in ${userLanguage} for a ${level} level student on Month ${month}, Day ${day}. You MUST generate a TOTAL of between 20 and 30 items combined across all four categories (never fewer than 20, never more than 30) — roughly 5 to 8 items in EACH of: sentences, translations, arrangements, mcqs. Return STRICT JSON only: { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }`;
       const rawText = await callGeminiRestApi(prompt);
       const parsed = safeJsonParse(rawText);
       if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) {
@@ -253,34 +255,126 @@ export const humanAiService = {
       }
       throw new Error("Tasks error");
     } catch (error) {
-      // FIX: fallback used to only have 1 item per category (4 total).
-      // Now has 4 per category (16 total) matching the real expected count.
+      // FIX: fallback expanded to 6 items per category (24 total, within the
+      // 20-30 target range) instead of the old 1-per-category (4 total).
       return {
         sentences: [
           { english: "I practice English daily.", translation: "मैं रोज अंग्रेजी अभ्यास करता हूँ।" },
           { english: "She works in an office.", translation: "वह एक ऑफिस में काम करती है।" },
           { english: "We will meet tomorrow.", translation: "हम कल मिलेंगे।" },
-          { english: "He is learning new skills.", translation: "वह नए कौशल सीख रहा है।" }
+          { english: "He is learning new skills.", translation: "वह नए कौशल सीख रहा है।" },
+          { english: "They traveled to Mumbai last week.", translation: "वे पिछले हफ्ते मुंबई गए थे।" },
+          { english: "Can you help me with this task?", translation: "क्या आप इस काम में मेरी मदद कर सकते हैं?" }
         ],
         translations: [
           { translation: "आपका दिन कैसा था?", english: "How was your day?" },
           { translation: "मुझे यह पसंद है।", english: "I like this." },
           { translation: "कृपया मेरी मदद करें।", english: "Please help me." },
-          { translation: "यह बहुत अच्छा है।", english: "This is very good." }
+          { translation: "यह बहुत अच्छा है।", english: "This is very good." },
+          { translation: "मैं थोड़ा व्यस्त हूँ।", english: "I am a bit busy." },
+          { translation: "हमें जल्दी निकलना चाहिए।", english: "We should leave soon." }
         ],
         arrangements: [
           { jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "मैं अंग्रेजी सीख रहा हूँ।" },
           { jumbled: ["work", "I", "office", "in", "an"], correct: "I work in an office", translation: "मैं एक ऑफिस में काम करता हूँ।" },
           { jumbled: ["today", "busy", "very", "is", "she"], correct: "She is very busy today", translation: "वह आज बहुत व्यस्त है।" },
-          { jumbled: ["tomorrow", "meeting", "a", "have", "we"], correct: "We have a meeting tomorrow", translation: "हमारी कल एक मीटिंग है।" }
+          { jumbled: ["tomorrow", "meeting", "a", "have", "we"], correct: "We have a meeting tomorrow", translation: "हमारी कल एक मीटिंग है।" },
+          { jumbled: ["question", "a", "ask", "may", "I"], correct: "May I ask a question", translation: "क्या मैं एक सवाल पूछ सकता हूँ।" },
+          { jumbled: ["email", "the", "sent", "I", "have"], correct: "I have sent the email", translation: "मैंने ईमेल भेज दिया है।" }
         ],
         mcqs: [
           { question: "She ___ to work daily.", options: ["go", "goes", "going"], answer: "goes", explanation: "Singular takes 'goes'.", translation: "वह रोज काम पर जाती है।" },
           { question: "They ___ studying now.", options: ["is", "are", "am"], answer: "are", explanation: "'They' takes 'are'.", translation: "वे अभी पढ़ रहे हैं।" },
           { question: "I ___ finished my work.", options: ["have", "has", "had"], answer: "have", explanation: "'I' takes 'have' in present perfect.", translation: "मैंने अपना काम पूरा कर लिया है।" },
-          { question: "He ___ to the gym every morning.", options: ["go", "goes", "went"], answer: "goes", explanation: "Present simple habit uses 'goes'.", translation: "वह हर सुबह जिम जाता है।" }
+          { question: "He ___ to the gym every morning.", options: ["go", "goes", "went"], answer: "goes", explanation: "Present simple habit uses 'goes'.", translation: "वह हर सुबह जिम जाता है।" },
+          { question: "We ___ dinner at 8 PM yesterday.", options: ["have", "had", "having"], answer: "had", explanation: "Past simple for a finished action.", translation: "हमने कल रात 8 बजे खाना खाया था।" },
+          { question: "This is the ___ book I have read.", options: ["good", "better", "best"], answer: "best", explanation: "Superlative form for comparing more than two.", translation: "यह वह सबसे अच्छी किताब है जो मैंने पढ़ी है।" }
         ]
       };
+    }
+  },
+
+  /**
+   * Generates a WHOLE MONTH of daily tasks in a single API call (one call
+   * covers all days in that month) instead of one call per day. This is the
+   * key to being able to pre-generate the roadmap's tasks without burning
+   * through the API quota: 12 months = 12 calls total, not 336 (12 months ×
+   * 28 days) separate calls.
+   *
+   * Already-cached days are skipped and not re-requested.
+   */
+  async generateMonthTasks(level: string, month: number, targetLanguage?: string, daysInMonth: number = 28) {
+    const userLanguage = targetLanguage || getSelectedLanguageName();
+    const results: Record<number, any> = {};
+    const missingDays: number[] = [];
+
+    if (typeof window !== 'undefined') {
+      for (let day = 1; day <= daysInMonth; day++) {
+        const cacheKey = `humnai_cache_tasks_${level.toLowerCase()}_m${month}_d${day}_${userLanguage.toLowerCase()}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed && (parsed.sentences?.length || parsed.mcqs?.length)) {
+              results[day] = parsed;
+              continue;
+            }
+          } catch (e) {}
+        }
+        missingDays.push(day);
+      }
+    } else {
+      for (let day = 1; day <= daysInMonth; day++) missingDays.push(day);
+    }
+
+    if (missingDays.length === 0) return results;
+
+    try {
+      const prompt = `Generate a FULL month of English practice tasks in ${userLanguage} for a ${level} level student, Month ${month}. Generate a complete, DIFFERENT set of tasks for EACH of these day numbers: ${missingDays.join(', ')}. For EVERY day, include a TOTAL of between 20 and 30 items combined across all four categories (never fewer than 20, never more than 30) — roughly 5 to 8 items in EACH of: sentences, translations, arrangements, mcqs. Return STRICT JSON only, with one key per day number (as a string): { "${missingDays[0]}": { "sentences": [], "translations": [], "arrangements": [], "mcqs": [] }${missingDays.length > 1 ? `, "${missingDays[1]}": { ... }` : ''}, ... one entry for every requested day number }`;
+      const rawText = await callGeminiRestApi(prompt);
+      const parsed = safeJsonParse(rawText);
+
+      if (parsed && typeof parsed === 'object') {
+        for (const day of missingDays) {
+          const dayData = parsed[String(day)];
+          if (dayData && (dayData.sentences?.length || dayData.mcqs?.length)) {
+            results[day] = dayData;
+            if (typeof window !== 'undefined') {
+              const cacheKey = `humnai_cache_tasks_${level.toLowerCase()}_m${month}_d${day}_${userLanguage.toLowerCase()}`;
+              try { localStorage.setItem(cacheKey, JSON.stringify(dayData)); } catch (e) {}
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ Pregeneration failed for Month ${month}, days will fall back to on-demand generation:`, error);
+    }
+
+    return results;
+  },
+
+  /**
+   * Call this ONCE right after a roadmap is generated (or loaded) so every
+   * day's tasks for every month get pre-generated and cached in the
+   * background. By the time the user taps into any day in Practice, its
+   * tasks are already sitting in localStorage — no loading delay.
+   *
+   * Runs sequentially with a short gap between months to avoid hammering
+   * the API and tripping rate limits. Safe to call multiple times — already
+   * cached months/days are skipped automatically.
+   */
+  async pregenerateRoadmapTasks(
+    level: string,
+    totalMonths: number = 12,
+    daysPerMonth: number = 28,
+    targetLanguage?: string,
+    onProgress?: (monthDone: number, totalMonths: number) => void
+  ) {
+    for (let month = 1; month <= totalMonths; month++) {
+      await this.generateMonthTasks(level, month, targetLanguage, daysPerMonth);
+      onProgress?.(month, totalMonths);
+      // Small gap between months so we don't fire everything in one burst.
+      await new Promise((resolve) => setTimeout(resolve, 400));
     }
   },
 
