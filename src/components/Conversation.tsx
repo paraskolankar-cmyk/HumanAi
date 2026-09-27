@@ -1,16 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Send, 
-  Mic, 
-  MicOff, 
-  X,
-  Maximize2,
-  MessageCircle,
-  AlertCircle,
-  Languages,
-  Loader2,
-  Volume2,
-  Trash2
+import {
+  Send, Mic, Languages, Loader2, Volume2, Trash2, AlertCircle, BookOpen, TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { humanAiService } from '@/src/services/geminiService';
@@ -24,6 +14,7 @@ interface Message {
   correction?: string;
   translation?: string;
   explanation?: string;
+  wordOfDay?: string;
   timestamp?: number;
   isError?: boolean;
 }
@@ -44,34 +35,69 @@ interface ConversationProps {
   onTrialExpired?: () => void;
 }
 
-// Time + name aware welcome message — replaces the old hardcoded static greeting.
+const LEVEL_CONFIG = {
+  Beginner: {
+    badge: '🌱 Beginner',
+    color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+    tip: 'Koi bhi chhoti si baat English mein likhne ki koshish karo — galti karna bilkul theek hai! 😊',
+    placeholder: 'Kuch bhi likho English mein... (e.g. "My name is...")',
+  },
+  Intermediate: {
+    badge: '⚡ Intermediate',
+    color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    tip: 'Try using full sentences with proper tense — I will correct you gently! 💬',
+    placeholder: 'Type anything in English... try a full sentence!',
+  },
+  Advanced: {
+    badge: '🚀 Advanced',
+    color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+    tip: 'Push yourself — use idioms, complex sentences, or discuss any topic! 🎯',
+    placeholder: 'Express yourself freely — no limits!',
+  },
+};
+
 function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  if (hour < 21) return 'Good evening';
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  if (h < 21) return 'Good evening';
   return 'Good night';
 }
 
-function buildWelcomeMessage(userName?: string | null): Message {
-  const greeting = getTimeGreeting();
-  const text = userName && userName.trim()
-    ? `${greeting}, ${userName.trim()}! 👋 Great to see you again. What would you like to talk about today?`
-    : `${greeting}! 👋 I'm HumnAi. What would you like to talk about today?`;
+function getUserLevel(): 'Beginner' | 'Intermediate' | 'Advanced' {
+  if (typeof window === 'undefined') return 'Beginner';
+  const level = localStorage.getItem('humnai_user_level') || 'Beginner';
+  if (level === 'Intermediate' || level === 'Advanced') return level;
+  return 'Beginner';
+}
 
-  return {
-    id: `welcome_${Date.now()}`,
-    role: 'ai',
-    text,
-    timestamp: Date.now()
-  };
+function buildWelcomeMessage(userName?: string | null, level?: string): Message {
+  const greeting = getTimeGreeting();
+  const name = userName?.trim();
+  const lvl = level || getUserLevel();
+
+  const beginnerWelcome = name
+    ? `${greeting}, ${name}! 👋 Main hoon HumnAi — tumhara English dost! Aaj kya baat karein? Kuch bhi likho — Hindi mein sochkar English mein likhne ki koshish karo! 😊`
+    : `${greeting}! 👋 Main hoon HumnAi — tumhara personal English tutor! Koi bhi chhoti baat English mein likhkar bhejo — main tumhare saath hoon! 🌟`;
+
+  const intermediateWelcome = name
+    ? `${greeting}, ${name}! 👋 Welcome back! Let's have a real English conversation today. What's on your mind?`
+    : `${greeting}! 👋 I'm HumnAi. Let's practice English together — what would you like to talk about today?`;
+
+  const advancedWelcome = name
+    ? `${greeting}, ${name}! 🎯 Good to see you. Ready for some sharp English practice? What shall we discuss today?`
+    : `${greeting}! 🎯 I'm HumnAi — your English sparring partner. Pick any topic and let's dive in!`;
+
+  const text = lvl === 'Advanced' ? advancedWelcome : lvl === 'Intermediate' ? intermediateWelcome : beginnerWelcome;
+
+  return { id: `welcome_${Date.now()}`, role: 'ai', text, timestamp: Date.now() };
 }
 
 export default function Conversation({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired }: ConversationProps) {
-  const [messages, setMessages] = useState<Message[]>(() => [buildWelcomeMessage(userName)]);
-  // Guards against the loadHistory effect wiping an in-progress conversation
-  // (e.g. when userEmail resolves from null -> real value after auth loads,
-  // or the effect re-runs for any other reason mid-chat).
+  const userLevel = getUserLevel();
+  const levelCfg = LEVEL_CONFIG[userLevel];
+
+  const [messages, setMessages] = useState<Message[]>(() => [buildWelcomeMessage(userName, userLevel)]);
   const hasLoadedOnceRef = useRef(false);
   const lastLoadedEmailRef = useRef<string | null>(null);
   const [inputText, setInputText] = useState('');
@@ -80,469 +106,218 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
   const [interimTranscript, setInterimTranscript] = useState('');
   const [targetLanguage, setTargetLanguage] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('humnai_user_language') || localStorage.getItem('humnai_native_language') || 'Hindi';
+      return localStorage.getItem('humnai_user_language') || 'Hindi';
     }
     return 'Hindi';
   });
   const [speechInputLang, setSpeechInputLang] = useState<'en-US' | 'native'>('en-US');
+  const [messageCount, setMessageCount] = useState(0);
+  const [showLevelTip, setShowLevelTip] = useState(true);
 
   const langMap: Record<string, string> = {
-    'Hindi': 'hi-IN',
-    'Marathi': 'mr-IN',
-    'Spanish': 'es-ES',
-    'French': 'fr-FR',
-    'German': 'de-DE',
-    'Japanese': 'ja-JP',
-    'Bengali': 'bn-IN',
-    'Tamil': 'ta-IN',
-    'Telugu': 'te-IN',
-    'Urdu': 'ur-PK',
-    'Punjabi': 'pa-IN',
-    'Gujarati': 'gu-IN',
-    'Kannada': 'kn-IN',
-    'Odia': 'or-IN',
-    'Bhojpuri': 'hi-IN',
-    'Assamese': 'as-IN',
-    'Malayalam': 'ml-IN'
+    Hindi: 'hi-IN', Marathi: 'mr-IN', Spanish: 'es-ES', French: 'fr-FR',
+    German: 'de-DE', Japanese: 'ja-JP', Bengali: 'bn-IN', Tamil: 'ta-IN',
+    Telugu: 'te-IN', Urdu: 'ur-PK', Punjabi: 'pa-IN', Gujarati: 'gu-IN',
+    Kannada: 'kn-IN', Odia: 'or-IN', Bhojpuri: 'hi-IN', Assamese: 'as-IN', Malayalam: 'ml-IN'
   };
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const isSpeakingRef = useRef(false);
-  // Always-current snapshot of messages, kept in sync via effect below.
-  // Used for building AI prompt context WITHOUT relying on a closured
-  // `messages` value that could be stale if two sends race each other.
   const messagesRef = useRef<Message[]>([]);
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-  const generateMessageId = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-    return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  };
-
-  const persistToStorage = (updatedMessages: Message[]) => {
+  const persistToStorage = (msgs: Message[]) => {
     if (typeof window === 'undefined') return;
     const email = userEmail || localStorage.getItem('humnai_user_email');
-    const storageKey = `humnai_chat_${email || 'guest'}`;
-    localStorage.setItem(storageKey, JSON.stringify({
-      messages: updatedMessages,
-      timestamp: Date.now()
-    }));
+    localStorage.setItem(`humnai_chat_${email || 'guest'}`, JSON.stringify({ messages: msgs, timestamp: Date.now() }));
   };
 
-  /**
-   * Appends a single message using a FUNCTIONAL state update (setMessages(prev => ...)).
-   * This is the critical fix for "new reply replaces old message" — the previous
-   * code built the next array from the `messages` variable captured in the
-   * surrounding closure (`[...messages, newMsg]`). If a second send started
-   * before the first one's state update had flushed (e.g. AI is still
-   * "typing" and another message goes out, or voice + typed input overlap),
-   * that closure held a STALE snapshot, and persisting it would silently
-   * overwrite/drop whatever the other in-flight call had just added.
-   * Functional updates always operate on the latest state, so this can't happen.
-   */
-  const appendMessage = (newMsg: Message) => {
+  const appendMessage = (msg: Message) => {
     setMessages(prev => {
-      const updated = [...prev, newMsg];
+      const updated = [...prev, msg];
       persistToStorage(updated);
       return updated;
     });
   };
 
-  // 1. LOAD CHAT HISTORY (FAIL-SAFE DB & LOCAL STORAGE)
+  // Load history
   useEffect(() => {
     const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
-    const storageKey = `humnai_chat_${email || 'guest'}`;
-    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-    const now = Date.now();
+    if (hasLoadedOnceRef.current && lastLoadedEmailRef.current === (email || null)) return;
 
-    // Skip re-running for the SAME resolved email once we've already loaded —
-    // this is what stopped the "chat keeps replacing itself" bug. Previously
-    // this effect could re-run (e.g. userEmail resolving from null -> real
-    // value after auth finishes loading) and would unconditionally reset the
-    // whole conversation back to just the welcome message if no saved
-    // history was found yet, wiping out messages the user had just sent.
-    if (hasLoadedOnceRef.current && lastLoadedEmailRef.current === (email || null)) {
-      return;
-    }
+    const load = async () => {
+      let active: Message[] = [];
+      const now = Date.now();
+      const TTL = 24 * 60 * 60 * 1000;
+      const storageKey = `humnai_chat_${email || 'guest'}`;
 
-    const loadHistory = async () => {
-      let activeMessages: Message[] = [];
-
-      // LocalStorage First
-      const localData = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
-      if (localData) {
+      const local = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
+      if (local) {
         try {
-          const parsed = JSON.parse(localData);
-          const savedMessages: Message[] = parsed.messages || [];
-          
-          activeMessages = savedMessages.filter(msg => {
-            const msgTime = msg.timestamp || parsed.timestamp || now;
-            return now - msgTime < TWENTY_FOUR_HOURS_MS;
-          });
-
-          if (activeMessages.length === 0 && savedMessages.length > 0) {
-            localStorage.removeItem(storageKey);
-          }
-        } catch (e) {
-          console.error("Error parsing local chat history:", e);
-        }
+          const parsed = JSON.parse(local);
+          active = (parsed.messages || []).filter((m: Message) => now - (m.timestamp || parsed.timestamp || now) < TTL);
+          if (active.length === 0) localStorage.removeItem(storageKey);
+        } catch {}
       }
 
-      // DB Fallback (Wrapped in try-catch so 405/Network errors never block chat)
-      if (email && activeMessages.length === 0) {
+      if (email && active.length === 0) {
         try {
           const history = await dbService.getChatHistory(email);
-          if (history && Array.isArray(history) && history.length > 0) {
-            const dbMessages: Message[] = history.map((m: any) => ({
-              id: m.id?.toString() || Date.now().toString(),
-              role: m.role,
-              text: m.text,
-              correction: m.correction,
-              translation: m.translation,
-              explanation: m.explanation,
-              timestamp: m.timestamp ? new Date(m.timestamp).getTime() : (m.created_at ? new Date(m.created_at).getTime() : now)
-            }));
-
-            activeMessages = dbMessages.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
+          if (Array.isArray(history) && history.length > 0) {
+            active = history.map((m: any) => ({
+              id: m.id?.toString() || generateId(),
+              role: m.role, text: m.text, correction: m.correction,
+              translation: m.translation, explanation: m.explanation,
+              timestamp: m.timestamp ? new Date(m.timestamp).getTime() : now
+            })).filter((m: Message) => now - (m.timestamp || now) < TTL);
           }
-        } catch (err) {
-          console.warn("Failed to load chat history from database (using client storage fallback):", err);
-        }
+        } catch {}
       }
 
       hasLoadedOnceRef.current = true;
       lastLoadedEmailRef.current = email || null;
 
-      if (activeMessages.length > 0) {
-        setMessages(activeMessages);
+      if (active.length > 0) {
+        setMessages(active);
+        setMessageCount(active.filter(m => m.role === 'user').length);
       } else {
-        // IMPORTANT: only reset to the welcome message if there's no
-        // in-progress conversation already sitting in memory. Otherwise a
-        // stray effect re-run would silently erase everything the user typed.
-        setMessages(prev => (prev.length > 1 ? prev : [buildWelcomeMessage(userName)]));
+        setMessages(prev => prev.length > 1 ? prev : [buildWelcomeMessage(userName, userLevel)]);
       }
     };
 
-    loadHistory();
+    load();
   }, [userEmail, userName]);
 
-  // Live 24-hour auto-purge: even if the user keeps the app open past 24
-  // hours without refreshing, expired messages get cleared automatically.
-  useEffect(() => {
-    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setMessages(prev => {
-        const stillValid = prev.filter(msg => now - (msg.timestamp || now) < TWENTY_FOUR_HOURS_MS);
-        if (stillValid.length === prev.length) return prev; // nothing expired, avoid needless re-render
-
-        const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
-        const storageKey = `humnai_chat_${email || 'guest'}`;
-        const finalMessages = stillValid.length > 0 ? stillValid : [buildWelcomeMessage(userName)];
-
-        if (typeof window !== 'undefined') {
-          if (stillValid.length === 0) {
-            localStorage.removeItem(storageKey);
-          } else {
-            localStorage.setItem(storageKey, JSON.stringify({ messages: finalMessages, timestamp: now }));
-          }
-        }
-
-        return finalMessages;
-      });
-    }, 60 * 1000); // check every minute
-
-    return () => clearInterval(interval);
-  }, [userEmail, userName]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const persistMessages = (updatedMessages: Message[]) => {
-    setMessages(updatedMessages);
-
-    if (typeof window !== 'undefined') {
-      const email = userEmail || localStorage.getItem('humnai_user_email');
-      const storageKey = `humnai_chat_${email || 'guest'}`;
-
-      localStorage.setItem(storageKey, JSON.stringify({
-        messages: updatedMessages,
-        timestamp: Date.now()
-      }));
-    }
-  };
-
-  const clearChatHistory = () => {
-    if (confirm("Are you sure you want to clear your conversation history?")) {
-      const defaultMsg: Message[] = [buildWelcomeMessage(userName)];
-      persistMessages(defaultMsg);
-    }
-  };
-
-  // Initialize Speech Recognition
+  // Speech recognition
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = speechInputLang === 'en-US' ? 'en-US' : (langMap[targetLanguage] || 'hi-IN');
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = speechInputLang === 'en-US' ? 'en-US' : (langMap[targetLanguage] || 'hi-IN');
 
-      recognition.onstart = () => {
-        setIsListening(true);
-        setInterimTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let currentInterim = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            currentInterim += event.results[i][0].transcript;
-          }
-        }
-
-        if (currentInterim) {
-          setInterimTranscript(currentInterim);
-        }
-
-        if (finalTranscript) {
-          setInterimTranscript('');
-          handleVoiceInput(finalTranscript);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error === 'no-speech' || event.error === 'aborted') {
-          return; 
-        }
-        console.error('Speech recognition error', event.error);
-        if (event.error === 'not-allowed') {
-          alert('Microphone access denied. Please enable it in your browser settings.');
-        }
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    }
-
-    const updateVoices = () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.getVoices();
+    recognition.onstart = () => { setIsListening(true); setInterimTranscript(''); };
+    recognition.onresult = (e: any) => {
+      let final = ''; let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
       }
+      if (interim) setInterimTranscript(interim);
+      if (final) { setInterimTranscript(''); handleVoiceInput(final); }
     };
-    updateVoices();
-
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
-      }
+    recognition.onerror = (e: any) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      if (e.error === 'not-allowed') alert('Microphone access denied. Please allow it in browser settings.');
+      setIsListening(false);
     };
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
+
+    return () => { recognitionRef.current?.stop(); };
   }, [speechInputLang, targetLanguage]);
 
-  const speak = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
+  const speak = (text: string, lang = 'en-US', onComplete?: () => void) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
     speakRaw(text, lang, onComplete);
   };
 
-  /**
-   * Same as `speak`, but WITHOUT calling speechSynthesis.cancel() first.
-   * Chrome has a known bug: calling cancel() immediately followed by
-   * speak() in quick succession (like chaining utterances back-to-back
-   * inside an onend callback) often fails SILENTLY — no error, it just
-   * never speaks. That's exactly why only the first item in a sequence
-   * (natural reply) was audible, and the correction + explanation that
-   * followed right after were getting swallowed.
-   */
-  const speakRaw = (text: string, lang: string = 'en-US', onComplete?: () => void) => {
+  const speakRaw = (text: string, lang = 'en-US', onComplete?: () => void) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-
-    isSpeakingRef.current = true;
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 0.95;
-
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = lang;
+    utt.rate = userLevel === 'Beginner' ? 0.85 : 0.95; // Slower for beginners
     const voices = window.speechSynthesis.getVoices();
-    let preferredVoice;
-
-    if (lang.startsWith('en')) {
-      preferredVoice = voices.find(v => v.lang === 'en-IN' || v.name.includes('India'));
-      if (!preferredVoice) {
-        preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.name.includes('Female'));
-      }
-    } else {
-      preferredVoice = voices.find(v => v.lang === lang && (v.name.includes('India') || v.name.includes('Google') || v.name.includes('Microsoft')));
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang === lang);
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.name.includes('India'));
-      if (!preferredVoice) preferredVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-    }
-
-    if (preferredVoice) utterance.voice = preferredVoice;
-
-    utterance.onstart = () => {
-      isSpeakingRef.current = true;
-    };
-
-    utterance.onend = () => {
-      isSpeakingRef.current = false;
-      if (onComplete) onComplete();
-    };
-
-    utterance.onerror = () => {
-      isSpeakingRef.current = false;
-      if (onComplete) onComplete();
-    };
-
-    window.speechSynthesis.speak(utterance);
+    let voice = lang.startsWith('en')
+      ? voices.find(v => v.lang === 'en-IN') || voices.find(v => v.name.includes('Google US English'))
+      : voices.find(v => v.lang === lang && v.name.includes('Google')) || voices.find(v => v.lang === lang);
+    if (voice) utt.voice = voice;
+    utt.onend = () => { if (onComplete) onComplete(); };
+    utt.onerror = () => { if (onComplete) onComplete(); };
+    window.speechSynthesis.speak(utt);
   };
 
-  /**
-   * Speaks a sequence of {text, lang} items one after another, in order.
-   * IMPORTANT: cancel() is called ONCE here, before the whole sequence
-   * starts — never between items — to avoid the Chrome cancel+speak race
-   * bug described above. A small delay is also added between items,
-   * since switching voice/language (English -> Hindi) back-to-back is
-   * another common trigger for silently-dropped utterances in Chrome.
-   */
   const speakSequence = (items: { text: string; lang: string }[]) => {
-    const queue = items.filter(i => i.text && i.text.trim().length > 0);
-    if (queue.length === 0) return;
-
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-
-    const playNext = (index: number) => {
-      if (index >= queue.length) return;
-      setTimeout(() => {
-        speakRaw(queue[index].text, queue[index].lang, () => playNext(index + 1));
-      }, 250);
+    const queue = items.filter(i => i.text?.trim());
+    if (!queue.length) return;
+    window.speechSynthesis?.cancel();
+    const playNext = (i: number) => {
+      if (i >= queue.length) return;
+      setTimeout(() => speakRaw(queue[i].text, queue[i].lang, () => playNext(i + 1)), 250);
     };
-
     playNext(0);
   };
 
-  /**
-   * SHARED message pipeline used by BOTH text input and voice input.
-   * Having one function means voice and typed chat can never drift apart
-   * or get fixed in only one place by mistake.
-   */
   const processUserMessage = async (rawText: string) => {
-    const formattedText = rawText.trim().charAt(0).toUpperCase() + rawText.trim().slice(1);
-    if (!formattedText) return;
+    const text = rawText.trim().charAt(0).toUpperCase() + rawText.trim().slice(1);
+    if (!text) return;
 
-    if (!isPro && messagesRef.current.length >= 10) {
+    // Free user message limit
+    if (!isPro && messagesRef.current.filter(m => m.role === 'user').length >= 10) {
       if (onTrialExpired) onTrialExpired();
       return;
     }
 
-    const userMsg: Message = {
-      id: generateMessageId(),
-      role: 'user',
-      text: formattedText,
-      timestamp: Date.now()
-    };
-
-    // Functional append — never overwrites messages another in-flight call added.
+    const userMsg: Message = { id: generateId(), role: 'user', text, timestamp: Date.now() };
     appendMessage(userMsg);
+    setMessageCount(prev => prev + 1);
 
     const email = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('humnai_user_email') : null);
     if (email) {
-      try { dbService.saveChatMessage(email, { role: 'user', text: formattedText }); } catch (e) {}
+      try { dbService.saveChatMessage(email, { role: 'user', text }); } catch {}
     }
 
     setIsProcessing(true);
 
     try {
-      // Build history context from the up-to-date ref (includes the userMsg
-      // we just appended, since React applies functional updates synchronously
-      // to messagesRef via the sync effect on the next render — but to be
-      // fully safe we just append it manually here for the prompt only).
       const historySource = [...messagesRef.current, userMsg].slice(-10);
       const historyContext = historySource.map(m => `${m.role === 'user' ? 'User' : 'HumnAi'}: ${m.text}`);
 
-      const correctionData = await humanAiService.correctSentence(formattedText, historyContext, targetLanguage);
-      const aiResponseText = correctionData.response || "That sounds really interesting!";
+      const result = await humanAiService.correctSentence(text, historyContext, targetLanguage);
 
-      const cleanOriginal = formattedText.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const cleanCorrected = (correctionData.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const isCorrectionNeeded = cleanCorrected.length > 0 && cleanCorrected !== cleanOriginal;
+      const aiText = result.response || result.message || "That's really interesting!";
+      const cleanOrig = text.trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '');
+      const cleanCorr = (result.corrected || '').trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '');
+      const hasMistake = cleanCorr.length > 0 && cleanCorr !== cleanOrig;
 
       const aiMsg: Message = {
-        id: generateMessageId(),
+        id: generateId(),
         role: 'ai',
-        text: aiResponseText,
-        correction: isCorrectionNeeded ? correctionData.corrected : undefined,
-        translation: correctionData.translation,
-        explanation: (isCorrectionNeeded || (correctionData.explanation && correctionData.explanation.trim().length > 0)) ? correctionData.explanation : undefined,
+        text: aiText,
+        correction: hasMistake ? result.corrected : undefined,
+        translation: result.translation,
+        explanation: hasMistake ? result.explanation : undefined,
+        wordOfDay: result.wordOfDay || undefined,
         timestamp: Date.now()
       };
 
-      // Functional append again — same safety guarantee.
       appendMessage(aiMsg);
 
       if (email) {
-        try {
-          dbService.saveChatMessage(email, {
-            role: 'ai',
-            text: aiMsg.text,
-            correction: aiMsg.correction,
-            translation: aiMsg.translation,
-            explanation: aiMsg.explanation
-          });
-        } catch (e) {}
+        try { dbService.saveChatMessage(email, { role: 'ai', text: aiMsg.text, correction: aiMsg.correction, translation: aiMsg.translation, explanation: aiMsg.explanation }); } catch {}
       }
 
-      // Speak in the order requested: natural reply first -> then the
-      // correct way of saying it -> then native-language explanation.
       const nativeLang = langMap[targetLanguage] || 'hi-IN';
       speakSequence([
-        { text: aiResponseText, lang: 'en-US' },
-        isCorrectionNeeded ? { text: correctionData.corrected, lang: 'en-US' } : { text: '', lang: 'en-US' },
-        correctionData.explanation ? { text: correctionData.explanation, lang: nativeLang } : { text: '', lang: nativeLang }
+        { text: aiText, lang: 'en-US' },
+        hasMistake ? { text: result.corrected, lang: 'en-US' } : { text: '', lang: 'en-US' },
+        result.explanation ? { text: result.explanation, lang: nativeLang } : { text: '', lang: nativeLang }
       ]);
-    } catch (error) {
-      console.error("AI message processing failed:", error);
 
-      // Previously: on error, nothing was shown to the user — the spinner would
-      // just vanish and the chat would look "stuck" with no reply at all.
-      // Now: show a visible, friendly error bubble so the user knows what happened.
-      const errorMsg: Message = {
-        id: generateMessageId(),
-        role: 'ai',
-        text: "Sorry, mujhe reply generate karne mein thodi problem ho rahi hai. Please dobara try karo 🙏",
-        timestamp: Date.now(),
-        isError: true
-      };
-      appendMessage(errorMsg);
+    } catch (err) {
+      console.error('Chat error:', err);
+      appendMessage({
+        id: generateId(), role: 'ai', isError: true, timestamp: Date.now(),
+        text: "Oops! Thodi connectivity problem hai abhi 🙏 Ek baar phir try karo!"
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -550,181 +325,244 @@ export default function Conversation({ isDarkMode, onThemeToggle, userEmail, use
 
   const handleVoiceInput = async (transcript: string) => {
     if (!transcript.trim()) return;
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
-    }
-
+    try { recognitionRef.current?.stop(); } catch {}
     await processUserMessage(transcript);
   };
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputText.trim() || isProcessing) return;
-
-    const textToSend = inputText;
+    const txt = inputText;
     setInputText('');
-    await processUserMessage(textToSend);
+    await processUserMessage(txt);
+  };
+
+  const clearChat = () => {
+    if (confirm('Are you sure you want to clear your conversation history?')) {
+      const fresh = [buildWelcomeMessage(userName, userLevel)];
+      setMessages(fresh);
+      setMessageCount(0);
+      persistToStorage(fresh);
+    }
   };
 
   return (
-    <div className="h-full md:h-[calc(100vh-12rem)] flex flex-col gap-4 md:gap-6 overflow-hidden">
-      {/* Chat Area */}
-      <div className="flex flex-col bg-white dark:bg-[#1F2937] rounded-2xl md:rounded-3xl border border-[#E5E7EB] dark:border-gray-800 shadow-sm overflow-hidden transition-all duration-500 flex-1">
-        {/* Chat Header */}
+    <div className="h-full md:h-[calc(100vh-12rem)] flex flex-col gap-4 overflow-hidden">
+
+      {/* Level Tip Banner */}
+      <AnimatePresence>
+        {showLevelTip && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm font-medium ${levelCfg.color}`}
+          >
+            <div className="flex items-center gap-2">
+              <TrendingUp size={16} />
+              <span>{levelCfg.tip}</span>
+            </div>
+            <button onClick={() => setShowLevelTip(false)} className="text-xs opacity-60 hover:opacity-100 font-bold shrink-0">✕</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Chat Box */}
+      <div className="flex flex-col bg-white dark:bg-[#1F2937] rounded-2xl md:rounded-3xl border border-[#E5E7EB] dark:border-gray-800 shadow-sm overflow-hidden flex-1">
+
+        {/* Header */}
         <div className="p-4 border-b border-[#E5E7EB] dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1F2937]">
           <div className="flex items-center gap-3">
             <div className="relative">
               <Logo collapsed={true} size="sm" />
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white dark:border-gray-800" />
             </div>
             <div>
-              <h3 className="font-bold text-[#111827] dark:text-white">HumnAi Chat</h3>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Real Human Conversational Partner</p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-[#111827] dark:text-white">HumnAi Chat</h3>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${levelCfg.color}`}>
+                  {levelCfg.badge}
+                </span>
+              </div>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online • Your AI English Dost</p>
             </div>
           </div>
-
-          <button 
-            onClick={clearChatHistory} 
-            title="Clear Chat History"
-            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
-          >
-            <Trash2 size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Message counter for free users */}
+            {!isPro && (
+              <span className="text-xs font-bold text-gray-400 dark:text-gray-500">
+                {Math.min(messageCount, 10)}/10 messages
+              </span>
+            )}
+            <button
+              onClick={clearChat}
+              title="Clear Chat"
+              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
         </div>
 
-        {/* Messages List */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#F9FAFB] dark:bg-[#111827]">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 bg-[#F9FAFB] dark:bg-[#111827]">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {msg.role === 'ai' && (
-                <div className="shrink-0 mb-1">
-                  <Logo collapsed={true} size="sm" />
-                </div>
+                <div className="shrink-0 mb-1"><Logo collapsed={true} size="sm" /></div>
               )}
-              <div className="max-w-[80%] space-y-2">
+              <div className="max-w-[82%] space-y-2">
+                {/* Main bubble */}
                 <div className={`p-4 rounded-2xl shadow-sm relative group ${
-                  msg.role === 'user' 
-                    ? 'bg-[#4F46E5] text-white rounded-tr-none' 
+                  msg.role === 'user'
+                    ? 'bg-[#4F46E5] text-white rounded-tr-none'
                     : msg.isError
-                      ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 rounded-tl-none border border-red-200 dark:border-red-900/40'
+                      ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 rounded-tl-none border border-red-200 dark:border-red-900'
                       : 'bg-white dark:bg-gray-800 text-[#111827] dark:text-white rounded-tl-none border border-[#E5E7EB] dark:border-gray-700'
                 }`}>
-                  <p className="text-sm md:text-base leading-relaxed pr-6">{msg.text}</p>
+                  <p className="text-sm md:text-base leading-relaxed pr-6 whitespace-pre-line">{msg.text}</p>
                   {msg.role === 'ai' && !msg.isError && (
-                    <button 
-                      onClick={() => {
-                        speakSequence([
-                          { text: msg.text, lang: 'en-US' },
-                          msg.correction ? { text: msg.correction, lang: 'en-US' } : { text: '', lang: 'en-US' },
-                          msg.explanation ? { text: msg.explanation, lang: langMap[targetLanguage] || 'hi-IN' } : { text: '', lang: 'hi-IN' }
-                        ]);
-                      }}
-                      className="absolute top-2 right-2 p-1 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                    <button
+                      onClick={() => speakSequence([
+                        { text: msg.text, lang: 'en-US' },
+                        msg.correction ? { text: msg.correction, lang: 'en-US' } : { text: '', lang: 'en-US' },
+                        msg.explanation ? { text: msg.explanation, lang: langMap[targetLanguage] || 'hi-IN' } : { text: '', lang: 'hi-IN' }
+                      ])}
+                      className="absolute top-2 right-2 p-1 text-gray-300 hover:text-indigo-500 transition-colors"
                     >
                       <Volume2 size={14} />
                     </button>
                   )}
                 </div>
-                
+
+                {/* Correction & Explanation card */}
                 {(msg.correction || msg.explanation) && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 p-3.5 rounded-2xl flex flex-col gap-2"
+                    className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40 p-3.5 rounded-2xl space-y-2"
                   >
                     {msg.correction && (
                       <div>
                         <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 mb-1">
-                          <AlertCircle size={14} />
-                          <span className="text-[10px] font-bold uppercase tracking-wider">Natural Refinement</span>
+                          <AlertCircle size={13} />
+                          <span className="text-[10px] font-bold uppercase tracking-wide">Sahi Tarika (Natural English)</span>
                         </div>
                         <p className="text-sm font-bold text-amber-950 dark:text-amber-100">"{msg.correction}"</p>
                       </div>
                     )}
-                    
                     {msg.explanation && (
                       <div className="bg-white/60 dark:bg-black/30 p-3 rounded-xl border border-amber-200/50 dark:border-amber-800/40">
-                        <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block uppercase mb-1">Native Grammar Explanation ({targetLanguage}):</span>
+                        <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block uppercase mb-1">
+                          {targetLanguage} mein Explanation:
+                        </span>
                         <p className="text-xs text-amber-900 dark:text-amber-100 font-medium leading-relaxed">{msg.explanation}</p>
                       </div>
                     )}
-
                     {msg.translation && (
-                      <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs pt-1 border-t border-amber-100 dark:border-amber-900/30">
+                      <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs pt-1 border-t border-amber-100 dark:border-amber-900/30">
                         <Languages size={12} />
                         <span>{msg.translation}</span>
                       </div>
                     )}
                   </motion.div>
                 )}
+
+                {/* Word of the Day — only for Beginners */}
+                {msg.wordOfDay && userLevel === 'Beginner' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/40 p-3 rounded-2xl"
+                  >
+                    <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 mb-1">
+                      <BookOpen size={13} />
+                      <span className="text-[10px] font-bold uppercase tracking-wide">Word of the Day</span>
+                    </div>
+                    <p className="text-xs text-indigo-800 dark:text-indigo-200 font-medium leading-relaxed">{msg.wordOfDay}</p>
+                  </motion.div>
+                )}
               </div>
             </div>
           ))}
 
+          {/* Typing indicator */}
           {isProcessing && (
             <div className="flex justify-start">
-              <div className="bg-white dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 p-3 rounded-2xl flex items-center gap-2 text-[#6B7280] dark:text-gray-400">
-                <Loader2 size={16} className="animate-spin text-indigo-600" />
-                <span className="text-sm">HumnAi is typing...</span>
+              <div className="bg-white dark:bg-gray-800 border border-[#E5E7EB] dark:border-gray-700 px-4 py-3 rounded-2xl flex items-center gap-2 text-gray-400">
+                <Loader2 size={15} className="animate-spin text-indigo-500" />
+                <span className="text-sm">
+                  {userLevel === 'Beginner' ? 'HumnAi soch raha hai...' : 'HumnAi is typing...'}
+                </span>
               </div>
             </div>
           )}
+
+          {/* Interim voice transcript */}
+          {isListening && interimTranscript && (
+            <div className="flex justify-end">
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-4 py-2 rounded-2xl text-sm text-indigo-600 dark:text-indigo-300 italic">
+                🎙 {interimTranscript}...
+              </div>
+            </div>
+          )}
+
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input Form */}
-        <form onSubmit={handleSendMessage} className="p-4 bg-white dark:bg-[#1F2937] border-t border-[#E5E7EB] dark:border-gray-800 flex items-center gap-3">
-          <div className="flex items-center gap-1">
+        {/* Input Area */}
+        <form onSubmit={handleSend} className="p-4 bg-white dark:bg-[#1F2937] border-t border-[#E5E7EB] dark:border-gray-800 flex items-center gap-3">
+          {/* Mic button */}
+          <div className="flex items-center gap-1 shrink-0">
             <div className="relative">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 disabled={isProcessing}
                 onClick={() => {
-                  if (isListening) {
-                    recognitionRef.current?.stop();
-                  } else {
-                    try {
-                      recognitionRef.current?.start();
-                    } catch (e) {
-                      console.error('Failed to start recognition from chat', e);
-                    }
-                  }
+                  if (isListening) { try { recognitionRef.current?.stop(); } catch {} }
+                  else { try { recognitionRef.current?.start(); } catch {} }
                 }}
-                className={`p-2 rounded-xl transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isListening ? 'bg-indigo-100 dark:bg-indigo-900/40 text-[#4F46E5] dark:text-indigo-400' : 'text-[#6B7280] dark:text-gray-400 hover:bg-[#F3F4F6] dark:hover:bg-gray-800'}`}
+                className={`p-2 rounded-xl transition-all disabled:opacity-40 ${
+                  isListening
+                    ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600'
+                    : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
               >
                 <Mic size={20} />
               </button>
               {isListening && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-gray-800 animate-pulse"></span>
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-gray-800 animate-pulse" />
               )}
             </div>
-            
+
+            {/* Language toggle for voice */}
             <button
               type="button"
-              onClick={() => setSpeechInputLang(prev => prev === 'en-US' ? 'native' : 'en-US')}
-              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
-                speechInputLang === 'en-US' 
-                  ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/30' 
-                  : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30'
+              onClick={() => setSpeechInputLang(p => p === 'en-US' ? 'native' : 'en-US')}
+              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
+                speechInputLang === 'en-US'
+                  ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 border-indigo-200 dark:border-indigo-800'
+                  : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 border-emerald-200 dark:border-emerald-800'
               }`}
             >
               {speechInputLang === 'en-US' ? 'EN' : 'NAT'}
             </button>
           </div>
-          <input 
-            type="text" 
+
+          {/* Text input */}
+          <input
+            type="text"
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder={speechInputLang === 'en-US' ? "Type in English..." : `Type in ${targetLanguage}...`}
-            className="flex-1 bg-[#F3F4F6] dark:bg-gray-800 border-none rounded-xl px-4 py-2.5 text-sm text-[#111827] dark:text-white placeholder-[#9CA3AF] focus:ring-2 focus:ring-[#4F46E5] transition-all"
+            onChange={e => setInputText(e.target.value)}
+            placeholder={levelCfg.placeholder}
+            className="flex-1 bg-[#F3F4F6] dark:bg-gray-800 border-none rounded-xl px-4 py-2.5 text-sm text-[#111827] dark:text-white placeholder-[#9CA3AF] focus:ring-2 focus:ring-[#4F46E5] outline-none transition-all"
           />
-          <button 
+
+          {/* Send button */}
+          <button
             type="submit"
             disabled={!inputText.trim() || isProcessing}
-            className="p-2.5 bg-[#4F46E5] hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl transition-colors shadow-lg shadow-indigo-100 dark:shadow-none shrink-0 cursor-pointer"
+            className="p-2.5 bg-[#4F46E5] hover:bg-indigo-600 disabled:opacity-40 text-white rounded-xl transition-colors shadow-lg shadow-indigo-100 dark:shadow-none shrink-0"
           >
             <Send size={20} />
           </button>
