@@ -100,6 +100,45 @@ const DEFAULT_ROADMAP = [
   { month: 12, theme: "Career Mastery & Final Certification", objectives: ["Advanced Grammar Rules", "Full Mock Drills", "Complete Fluency Review"] }
 ];
 
+// ============================================================
+// STATIC FALLBACK — Zero API calls, always works
+// ============================================================
+function getStaticPracticeTasks(month: number, day: number, language: string = 'Hindi'): any {
+  const sentences = [
+    { english: "I go to work every morning.", translation: "Main har subah kaam par jaata hoon." },
+    { english: "She is learning English daily.", translation: "Woh roz English seekh rahi hai." },
+    { english: "We will meet tomorrow at 10 AM.", translation: "Hum kal subah 10 baje milenge." },
+    { english: "He completed the project on time.", translation: "Usne project samay par poora kiya." },
+    { english: "Can you please help me with this?", translation: "Kya aap is mein meri madad kar sakte hain?" },
+  ];
+
+  const translations = [
+    { translation: "Aapka din kaisa raha?", english: "How was your day?" },
+    { translation: "Main thoda vyast hoon.", english: "I am a bit busy." },
+    { translation: "Kripya mujhe batao.", english: "Please let me know." },
+    { translation: "Yeh bahut achha hai.", english: "This is very good." },
+    { translation: "Main samajh gaya.", english: "I understand." },
+  ];
+
+  const arrangements = [
+    { jumbled: ["learning", "am", "English", "I"], correct: "I am learning English", translation: "Main English seekh raha hoon." },
+    { jumbled: ["work", "I", "office", "in", "an"], correct: "I work in an office", translation: "Main ek office mein kaam karta hoon." },
+    { jumbled: ["today", "busy", "very", "is", "she"], correct: "She is very busy today", translation: "Woh aaj bahut vyast hai." },
+    { jumbled: ["tomorrow", "meeting", "a", "have", "we"], correct: "We have a meeting tomorrow", translation: "Hamari kal ek meeting hai." },
+    { jumbled: ["email", "the", "sent", "I", "have"], correct: "I have sent the email", translation: "Maine email bhej diya hai." },
+  ];
+
+  const mcqs = [
+    { question: `She ___ to work daily. (Month ${month}, Day ${day})`, options: ["go", "goes", "going"], answer: "goes", explanation: "She ke saath 'goes' lagate hain — third person singular.", translation: "Woh roz kaam par jaati hai." },
+    { question: "They ___ studying right now.", options: ["is", "are", "am"], answer: "are", explanation: "'They' ke saath hamesha 'are' use hota hai.", translation: "Woh abhi padh rahe hain." },
+    { question: "I ___ finished my homework.", options: ["have", "has", "had"], answer: "have", explanation: "'I' ke saath Present Perfect mein 'have' use hota hai.", translation: "Maine apna homework poora kar liya hai." },
+    { question: "Which is correct?", options: ["He don't eat meat.", "He doesn't eat meat.", "He not eat meat."], answer: "He doesn't eat meat.", explanation: "He/She/It ke negative mein 'doesn't + V1' use hota hai.", translation: "Woh maas nahi khata." },
+    { question: "Passive of: 'She wrote a letter'", options: ["A letter wrote by her.", "A letter was written by her.", "A letter is written by her."], answer: "A letter was written by her.", explanation: "Past Passive: was/were + V3. 'Write' ka V3 'written' hai.", translation: "Uske dwara ek khat likha gaya." },
+  ];
+
+  return { sentences, translations, arrangements, mcqs };
+}
+
 export default function Practice({ isDarkMode, onThemeToggle, userEmail, userName, isPro, onTrialExpired, onTabChange }: PracticeProps) {
   const [view, setView] = useState<'assessment' | 'roadmap' | 'practice'>(() => {
     const completed = localStorage.getItem('humnai_assessment_completed');
@@ -111,7 +150,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     return localStorage.getItem('humnai_user_profession') || '';
   });
   const [customProfession, setCustomProfession] = useState('');
-
   const [isAssessing, setIsAssessing] = useState(false);
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState<string[]>([]);
@@ -145,7 +183,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
   const [lockMessage, setLockMessage] = useState('');
-
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [taskType, setTaskType] = useState<'sentences' | 'translations' | 'arrangements' | 'mcqs'>('sentences');
   const [taskIndex, setTaskIndex] = useState(0);
@@ -156,50 +193,28 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const [userArrangement, setUserArrangement] = useState<string[]>([]);
   const recognitionRef = React.useRef<any>(null);
   const lastTranscriptRef = React.useRef<string>('');
-
-  // FIX (pregeneration): guards so we only ever kick off a background
-  // pregeneration run once per mount, instead of re-firing on every re-render
-  // or every time `roadmap`/`userLevel` happens to change.
   const pregenStartedRef = useRef(false);
 
   const currentSubTask = dailyTasks ? (
-    taskType === 'sentences' 
-      ? dailyTasks.sentences?.[taskIndex] 
-      : taskType === 'translations' 
-      ? dailyTasks.translations?.[taskIndex] 
-      : taskType === 'arrangements'
-      ? dailyTasks.arrangements?.[taskIndex]
-      : dailyTasks.mcqs?.[taskIndex]
+    taskType === 'sentences' ? dailyTasks.sentences?.[taskIndex]
+    : taskType === 'translations' ? dailyTasks.translations?.[taskIndex]
+    : taskType === 'arrangements' ? dailyTasks.arrangements?.[taskIndex]
+    : dailyTasks.mcqs?.[taskIndex]
   ) : null;
 
   const normalizeText = (str: string) => {
-    return (str || '')
-      .trim()
-      .toLowerCase()
+    return (str || '').trim().toLowerCase()
       .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
       .replace(/\s+/g, " ");
   };
 
-  // FIX (pregeneration): for a RETURNING user who already has a roadmap and
-  // assessment completed (page refresh / re-visit), kick off background
-  // pregeneration once so any days that aren't cached yet (e.g. new months,
-  // or content added after this feature shipped) get filled in without the
-  // user ever seeing a loading spinner when they tap a day.
   useEffect(() => {
-    if (
-      view === 'roadmap' &&
-      roadmap &&
-      roadmap.length > 0 &&
-      userLevel &&
-      !pregenStartedRef.current
-    ) {
+    if (view === 'roadmap' && roadmap?.length > 0 && userLevel && !pregenStartedRef.current) {
       pregenStartedRef.current = true;
-      // Fire and forget — do NOT await, this must never block the UI.
       humanAiService
         .pregenerateRoadmapTasks(userLevel, roadmap.length, 28, targetLanguage)
-        .catch((err) => console.warn('Background task pregeneration failed:', err));
+        .catch((err) => console.warn('Background pregeneration failed:', err));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, roadmap, userLevel]);
 
   useEffect(() => {
@@ -209,20 +224,17 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
       recognitionRef.current.lang = 'en-US';
-
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         lastTranscriptRef.current = transcript;
         processPronunciation(transcript);
       };
-
       recognitionRef.current.onend = () => {
         setIsRecording(false);
         if (!lastTranscriptRef.current && isRecording) {
           setFeedback({ status: 'incorrect', text: 'No speech detected. Please try again.' });
         }
       };
-
       recognitionRef.current.onerror = (event: any) => {
         setIsRecording(false);
         if (event.error !== 'no-speech') {
@@ -234,22 +246,18 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
 
   const processPronunciation = (transcript: string) => {
     if (!currentSubTask) return;
-    
-    const targetText = taskType === 'sentences' ? currentSubTask.english : 
-                       taskType === 'translations' ? currentSubTask.english :
-                       taskType === 'arrangements' ? currentSubTask.correct :
-                       currentSubTask.answer;
+    const targetText = taskType === 'sentences' ? currentSubTask.english
+      : taskType === 'translations' ? currentSubTask.english
+      : taskType === 'arrangements' ? currentSubTask.correct
+      : currentSubTask.answer;
     if (!targetText) return;
-    
     const target = normalizeText(targetText);
     const spoken = normalizeText(transcript);
-    
     const isCorrect = spoken.includes(target) || target.includes(spoken) || Math.random() > 0.4;
-    
     setFeedback({
       status: isCorrect ? 'correct' : 'incorrect',
-      text: isCorrect 
-        ? (taskType === 'translations' ? 'Correct Translation!' : 'Perfect pronunciation!') 
+      text: isCorrect
+        ? (taskType === 'translations' ? 'Correct Translation!' : 'Perfect pronunciation!')
         : `You said: "${transcript}". Try again!`
     });
     setShowTranslation(true);
@@ -276,9 +284,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     setShowTranslation(false);
     setUserArrangement([]);
     setSelectedOption(null);
-    if (taskType === 'sentences' || taskType === 'translations') {
-      toggleRecording();
-    }
+    if (taskType === 'sentences' || taskType === 'translations') toggleRecording();
   };
 
   const handleSelectProfession = (prof: string) => {
@@ -291,7 +297,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
   const handleQuizAnswer = async (answer: string) => {
     const newAnswers = [...quizAnswers, answer];
     setQuizAnswers(newAnswers);
-
     if (quizIndex < ASSESSMENT_QUESTIONS.length - 1) {
       setQuizIndex(quizIndex + 1);
     } else {
@@ -302,86 +307,108 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         const calculatedLevel = assessment.level || "Intermediate";
         setUserLevel(calculatedLevel);
         localStorage.setItem('humnai_user_level', calculatedLevel);
-        
         const plan = await humanAiService.generateLearningPlan(calculatedLevel, prof);
-        const finalPlan = (plan && plan.roadmap && plan.roadmap.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
-        
+        const finalPlan = (plan?.roadmap?.length > 0) ? plan.roadmap : DEFAULT_ROADMAP;
         setRoadmap(finalPlan);
         localStorage.setItem('humnai_roadmap', JSON.stringify(finalPlan));
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
-
-        // FIX (pregeneration): the moment the roadmap exists, kick off
-        // background generation of EVERY day's tasks for the WHOLE roadmap
-        // (one API call per month, via generateMonthTasks under the hood —
-        // see geminiService.ts). Not awaited on purpose: the user should see
-        // the roadmap screen immediately, not wait for 12 months of content
-        // to finish generating. By the time they tap any day, it's already
-        // cached and opens instantly instead of showing a loading spinner.
         pregenStartedRef.current = true;
-        humanAiService
-          .pregenerateRoadmapTasks(calculatedLevel, finalPlan.length, 28, targetLanguage)
-          .catch((err) => console.warn('Background task pregeneration failed:', err));
+        humanAiService.pregenerateRoadmapTasks(calculatedLevel, finalPlan.length, 28, targetLanguage)
+          .catch((err) => console.warn('Pregeneration failed:', err));
       } catch (error) {
-        console.error("Assessment evaluation error", error);
+        console.error("Assessment error", error);
         setUserLevel("Intermediate");
         setRoadmap(DEFAULT_ROADMAP);
         localStorage.setItem('humnai_roadmap', JSON.stringify(DEFAULT_ROADMAP));
         localStorage.setItem('humnai_assessment_completed', 'true');
         setView('roadmap');
-
         pregenStartedRef.current = true;
-        humanAiService
-          .pregenerateRoadmapTasks("Intermediate", DEFAULT_ROADMAP.length, 28, targetLanguage)
-          .catch((err) => console.warn('Background task pregeneration failed:', err));
+        humanAiService.pregenerateRoadmapTasks("Intermediate", DEFAULT_ROADMAP.length, 28, targetLanguage)
+          .catch((err) => console.warn('Pregeneration failed:', err));
       } finally {
         setIsAssessing(false);
       }
     }
   };
 
+  // ============================================================
+  // FIX 1: startDailyPractice — cache → AI → static fallback
+  // ============================================================
   const startDailyPractice = async (month: number, day: number) => {
     const dayKey = `${month}-${day}`;
+
+    // Lock check
     if (!completedDays[dayKey]) {
       let prevMonth = month;
       let prevDay = day - 1;
-      if (day === 1) {
-        prevMonth = month - 1;
-        prevDay = 28;
-      }
+      if (day === 1) { prevMonth = month - 1; prevDay = 28; }
       setLockMessage(`Please complete Month ${prevMonth} Day ${prevDay} first!`);
       setShowLockModal(true);
       return;
     }
 
+    // Pro check
     if (!isPro && (month > 1 || day > 1)) {
-      if (onTrialExpired) {
-        onTrialExpired();
-      } else {
-        alert("Please upgrade to Pro to access Day 2 and beyond!");
-      }
+      if (onTrialExpired) onTrialExpired();
+      else alert("Please upgrade to Pro to access Day 2 and beyond!");
       return;
     }
 
     setSelectedMonth(month);
     setSelectedDay(day);
     setIsLoadingTasks(true);
+
     try {
-      // Note: generateDailyTasks checks localStorage cache FIRST (see
-      // geminiService.ts). If background pregeneration already ran for this
-      // day, this resolves instantly from cache with no network call.
-      const tasks = await humanAiService.generateDailyTasks(userLevel || 'Beginner', month, day, targetLanguage);
-      if (tasks && (tasks.sentences || tasks.mcqs)) {
+      const lang = targetLanguage || 'Hindi';
+      const level = userLevel || 'Beginner';
+      const cacheKey = `humnai_cache_tasks_${level.toLowerCase()}_m${month}_d${day}_${lang.toLowerCase()}`;
+
+      let tasks: any = null;
+
+      // Step 1: localStorage cache
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed?.sentences?.length || parsed?.mcqs?.length) tasks = parsed;
+        } catch {}
+      }
+
+      // Step 2: AI call (only if not cached)
+      if (!tasks) {
+        try {
+          tasks = await humanAiService.generateDailyTasks(level, month, day, lang);
+        } catch (err) {
+          console.warn('AI task generation failed, using static fallback:', err);
+        }
+      }
+
+      // Step 3: Static fallback — always works
+      if (!tasks || (!tasks.sentences?.length && !tasks.mcqs?.length)) {
+        tasks = getStaticPracticeTasks(month, day, lang);
+      }
+
+      if (tasks && (tasks.sentences?.length || tasks.mcqs?.length)) {
         setDailyTasks(tasks);
         setTaskType('sentences');
         setTaskIndex(0);
+        setFeedback({ status: null, text: '' });
+        setShowTranslation(false);
+        setSelectedOption(null);
+        setUserArrangement([]);
         setView('practice');
       } else {
-        throw new Error("Failed to load task structure");
+        alert("Content load nahi hua. Internet check karke dobara try karo.");
       }
     } catch (error: any) {
-      console.error("Failed to load tasks", error);
-      alert("Loading practice content...");
+      console.error("Failed to load tasks:", error);
+      // Last resort static fallback
+      const fallback = getStaticPracticeTasks(month, day, targetLanguage);
+      setDailyTasks(fallback);
+      setTaskType('sentences');
+      setTaskIndex(0);
+      setView('practice');
     } finally {
       setIsLoadingTasks(false);
     }
@@ -399,7 +426,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     if (normalizeText(option) === normalizeText(correctAnswer)) {
       setFeedback({ status: 'correct', text: `Correct! ${explanation || ''}` });
     } else {
-      setFeedback({ status: 'incorrect', text: `Incorrect choice. Try again! ${explanation || ''}` });
+      setFeedback({ status: 'incorrect', text: `Incorrect. ${explanation || 'Try again!'}` });
     }
     setShowTranslation(true);
   };
@@ -408,15 +435,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     if (!currentSubTask) return;
     const result = userArrangement.join(' ');
     const isCorrect = normalizeText(result) === normalizeText(currentSubTask.correct);
-
-    if (isCorrect) {
-      setFeedback({ status: 'correct', text: '🎉 Perfectly arranged! Excellent work.' });
-    } else {
-      setFeedback({ 
-        status: 'incorrect', 
-        text: 'Incorrect arrangement. Check the full translation below and try again.' 
-      });
-    }
+    setFeedback({
+      status: isCorrect ? 'correct' : 'incorrect',
+      text: isCorrect ? '🎉 Perfectly arranged!' : 'Incorrect arrangement. Check translation below and try again.'
+    });
     setShowTranslation(true);
   };
 
@@ -436,7 +458,6 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       const nextDay = selectedDay < 28 ? selectedDay + 1 : 1;
       const nextMonth = selectedDay < 28 ? selectedMonth : selectedMonth + 1;
       const nextDayKey = `${nextMonth}-${nextDay}`;
-      
       const newCompleted = { ...completedDays, [dayKey]: true, [nextDayKey]: true };
       setCompletedDays(newCompleted);
       localStorage.setItem('humnai_completed_days', JSON.stringify(newCompleted));
@@ -449,80 +470,56 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
       if (email) {
         const lessonCount = Object.keys(completedLessons).length;
         const calcProgress = Math.min(100, Math.round((lessonCount / 20) * 100));
-
         try {
           await fetch('/api/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              email,
-              streak: Object.keys(newCompleted).length,
+              email, streak: Object.keys(newCompleted).length,
               time_spent: Math.max(15, lessonCount * 15),
-              goal_progress: calcProgress,
-              achievements: Math.floor(lessonCount / 3)
+              goal_progress: calcProgress, achievements: Math.floor(lessonCount / 3)
             })
           });
-        } catch (err) {
-          console.error("Failed to sync progress to server:", err);
-        }
-
-        dbService.syncUser({
-          email,
-          progress: newCompleted
-        });
+        } catch (err) { console.error("Sync failed:", err); }
+        dbService.syncUser({ email, progress: newCompleted });
       }
-      
       setShowCompletionModal(true);
     } else {
       if (taskType === 'sentences') {
-        if (taskIndex < sentenceLength - 1) {
-          setTaskIndex(taskIndex + 1);
-        } else {
-          setTaskType('translations');
-          setTaskIndex(0);
-        }
+        if (taskIndex < sentenceLength - 1) setTaskIndex(taskIndex + 1);
+        else { setTaskType('translations'); setTaskIndex(0); }
       } else if (taskType === 'translations') {
-        if (taskIndex < translationLength - 1) {
-          setTaskIndex(taskIndex + 1);
-        } else {
-          setTaskType('arrangements');
-          setTaskIndex(0);
-        }
+        if (taskIndex < translationLength - 1) setTaskIndex(taskIndex + 1);
+        else { setTaskType('arrangements'); setTaskIndex(0); }
       } else if (taskType === 'arrangements') {
-        if (taskIndex < arrangementLength - 1) {
-          setTaskIndex(taskIndex + 1);
-        } else {
-          setTaskType('mcqs');
-          setTaskIndex(0);
-        }
+        if (taskIndex < arrangementLength - 1) setTaskIndex(taskIndex + 1);
+        else { setTaskType('mcqs'); setTaskIndex(0); }
       } else if (taskType === 'mcqs') {
         setTaskIndex(taskIndex + 1);
       }
     }
   };
 
-  // DYNAMICALLY CALCULATE CURRENT QUESTION INDEX OUT OF TOTAL (20 TO 30 RANGE)
   const getCurrentQuestionNumber = () => {
     if (!dailyTasks) return 1;
-    const sentenceCount = dailyTasks.sentences?.length || 0;
-    const translationCount = dailyTasks.translations?.length || 0;
-    const arrangementCount = dailyTasks.arrangements?.length || 0;
-
+    const s = dailyTasks.sentences?.length || 0;
+    const t = dailyTasks.translations?.length || 0;
+    const a = dailyTasks.arrangements?.length || 0;
     if (taskType === 'sentences') return taskIndex + 1;
-    if (taskType === 'translations') return sentenceCount + taskIndex + 1;
-    if (taskType === 'arrangements') return sentenceCount + translationCount + taskIndex + 1;
-    return sentenceCount + translationCount + arrangementCount + taskIndex + 1;
+    if (taskType === 'translations') return s + taskIndex + 1;
+    if (taskType === 'arrangements') return s + t + taskIndex + 1;
+    return s + t + a + taskIndex + 1;
   };
 
   const getTotalQuestionsCount = () => {
     if (!dailyTasks) return 20;
-    return (dailyTasks.sentences?.length || 0) +
-           (dailyTasks.translations?.length || 0) +
-           (dailyTasks.arrangements?.length || 0) +
-           (dailyTasks.mcqs?.length || 0);
+    return (dailyTasks.sentences?.length || 0) + (dailyTasks.translations?.length || 0) +
+           (dailyTasks.arrangements?.length || 0) + (dailyTasks.mcqs?.length || 0);
   };
 
-  // 1. ASSESSMENT VIEW (PROFESSION + 5 QUESTIONS)
+  // ============================================================
+  // ASSESSMENT VIEW
+  // ============================================================
   if (view === 'assessment') {
     return (
       <div className="max-w-2xl mx-auto space-y-8 py-6">
@@ -534,7 +531,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
             {assessmentStep === 'profession' ? 'What is your Profession or Goal?' : '5-Question Quick English Test'}
           </h2>
           <p className="text-[#6B7280] dark:text-gray-400">
-            {assessmentStep === 'profession' 
+            {assessmentStep === 'profession'
               ? "We'll build a 12-month English roadmap customized for your career & daily needs."
               : "Answer these 5 questions so AI can calculate your level accurately."}
           </p>
@@ -546,32 +543,21 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               <h3 className="text-lg font-bold text-[#111827] dark:text-white">Select your primary role:</h3>
               <div className="grid grid-cols-1 gap-3">
                 {POPULAR_PROFESSIONS.map((prof, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSelectProfession(prof)}
-                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-semibold text-[#111827] dark:text-white flex items-center justify-between cursor-pointer"
-                  >
+                  <button key={idx} onClick={() => handleSelectProfession(prof)}
+                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-semibold text-[#111827] dark:text-white flex items-center justify-between cursor-pointer">
                     <span>{prof}</span>
                     <ChevronLeft size={18} className="rotate-180 text-gray-400" />
                   </button>
                 ))}
               </div>
-
               <div className="pt-4 border-t border-gray-100 dark:border-gray-800 space-y-3">
                 <p className="text-xs font-bold text-gray-400 uppercase">Or Enter Custom Role:</p>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={customProfession}
-                    onChange={(e) => setCustomProfession(e.target.value)}
-                    placeholder="e.g. Graphic Designer, Chef, Flight Attendant..."
-                    className="flex-1 p-3.5 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    onClick={() => handleSelectProfession('other')}
-                    disabled={!customProfession.trim()}
-                    className="px-6 py-3.5 bg-[#4F46E5] text-white rounded-xl font-bold hover:bg-indigo-600 disabled:opacity-50 transition-all cursor-pointer"
-                  >
+                  <input type="text" value={customProfession} onChange={(e) => setCustomProfession(e.target.value)}
+                    placeholder="e.g. Graphic Designer, Chef..."
+                    className="flex-1 p-3.5 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500" />
+                  <button onClick={() => handleSelectProfession('other')} disabled={!customProfession.trim()}
+                    className="px-6 py-3.5 bg-[#4F46E5] text-white rounded-xl font-bold hover:bg-indigo-600 disabled:opacity-50 transition-all cursor-pointer">
                     Continue
                   </button>
                 </div>
@@ -579,29 +565,24 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
             </div>
           ) : isAssessing ? (
             <div className="py-12 flex flex-col items-center justify-center space-y-4">
-              <Loader2 size={48} className="text-[#4F46E5] dark:text-indigo-400 animate-spin" />
+              <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
               <p className="text-lg font-semibold text-[#111827] dark:text-white">AI is evaluating your level & generating {userProfession} Roadmap...</p>
             </div>
           ) : (
             <div className="space-y-8">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-[#4F46E5] dark:text-indigo-400 uppercase tracking-wider">Question {quizIndex + 1} of {ASSESSMENT_QUESTIONS.length}</span>
+                <span className="text-sm font-bold text-[#4F46E5] uppercase tracking-wider">Question {quizIndex + 1} of {ASSESSMENT_QUESTIONS.length}</span>
                 <div className="flex gap-1.5">
                   {ASSESSMENT_QUESTIONS.map((_, i) => (
-                    <div key={i} className={`h-2 w-8 rounded-full ${i <= quizIndex ? 'bg-[#4F46E5] dark:bg-indigo-400' : 'bg-[#F3F4F6] dark:bg-gray-800'}`}></div>
+                    <div key={i} className={`h-2 w-8 rounded-full ${i <= quizIndex ? 'bg-[#4F46E5]' : 'bg-[#F3F4F6] dark:bg-gray-800'}`} />
                   ))}
                 </div>
               </div>
-
               <h3 className="text-xl font-bold text-[#111827] dark:text-white">{ASSESSMENT_QUESTIONS[quizIndex].question}</h3>
-
               <div className="grid grid-cols-1 gap-4">
-                {ASSESSMENT_QUESTIONS[quizIndex].options.map((option: string, i: number) => (
-                  <button
-                    key={i}
-                    onClick={() => handleQuizAnswer(option)}
-                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-medium text-[#111827] dark:text-white cursor-pointer"
-                  >
+                {ASSESSMENT_QUESTIONS[quizIndex].options.map((option, i) => (
+                  <button key={i} onClick={() => handleQuizAnswer(option)}
+                    className="w-full text-left p-4 rounded-2xl border border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-medium text-[#111827] dark:text-white cursor-pointer">
                     {option}
                   </button>
                 ))}
@@ -613,7 +594,24 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
-  // 2. ROADMAP VIEW
+  // ============================================================
+  // FIX 2: Loading spinner — shown while tasks load
+  // ============================================================
+  if (isLoadingTasks) {
+    return (
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center">
+        <Loader2 size={48} className="text-[#4F46E5] animate-spin" />
+        <h3 className="font-bold text-[#111827] dark:text-white text-xl">
+          Loading Month {selectedMonth} Day {selectedDay} Tasks...
+        </h3>
+        <p className="text-sm text-[#6B7280] dark:text-gray-400">Preparing your practice content</p>
+      </div>
+    );
+  }
+
+  // ============================================================
+  // ROADMAP VIEW
+  // ============================================================
   if (view === 'roadmap') {
     return (
       <div className="space-y-8">
@@ -625,24 +623,14 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
             </p>
           </div>
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => {
-                setAssessmentStep('profession');
-                setQuizIndex(0);
-                setQuizAnswers([]);
-                setView('assessment');
-              }}
-              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-            >
+            <button onClick={() => { setAssessmentStep('profession'); setQuizIndex(0); setQuizAnswers([]); setView('assessment'); }}
+              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer">
               <RefreshCw size={14} /> Retake Test & Goal
             </button>
             <div className="flex items-center gap-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 px-3 py-2 rounded-xl">
-              <Languages size={18} className="text-[#6B7280] dark:text-gray-500" />
-              <select 
-                value={targetLanguage}
-                onChange={(e) => setTargetLanguage(e.target.value)}
-                className="text-sm font-medium text-[#111827] dark:text-white bg-transparent border-none focus:ring-0 cursor-pointer"
-              >
+              <Languages size={18} className="text-[#6B7280]" />
+              <select value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)}
+                className="text-sm font-medium text-[#111827] dark:text-white bg-transparent border-none focus:ring-0 cursor-pointer">
                 <option value="Hindi">Hindi</option>
                 <option value="Marathi">Marathi</option>
                 <option value="Urdu">Urdu</option>
@@ -659,10 +647,8 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {roadmap.map((monthData, i) => (
             <div key={i} className="bg-white dark:bg-[#1F2937] rounded-3xl border border-[#E5E7EB] dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-xl flex items-center justify-center font-bold">
-                  M{monthData.month || (i + 1)}
-                </div>
+              <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] rounded-xl flex items-center justify-center font-bold mb-4">
+                M{monthData.month || (i + 1)}
               </div>
               <h3 className="text-lg font-bold text-[#111827] dark:text-white mb-2">{monthData.theme}</h3>
               <ul className="space-y-2 mb-6">
@@ -679,19 +665,15 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                   const mNum = monthData.month || (i + 1);
                   const dayKey = `${mNum}-${dayNum}`;
                   const isUnlocked = isPro ? completedDays[dayKey] : (mNum === 1 && dayNum === 1);
-                  
                   return (
-                    <button
-                      key={day}
-                      onClick={() => startDailyPractice(mNum, dayNum)}
-                      className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative group cursor-pointer ${
+                    <button key={day} onClick={() => startDailyPractice(mNum, dayNum)}
+                      className={`aspect-square rounded-md text-[10px] flex items-center justify-center transition-all relative cursor-pointer ${
                         dayNum === selectedDay && mNum === selectedMonth
-                          ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200 dark:ring-indigo-900'
+                          ? 'bg-[#4F46E5] text-white ring-2 ring-indigo-200'
                           : isUnlocked
-                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 hover:bg-indigo-100'
+                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] hover:bg-indigo-100'
                           : 'bg-gray-100 dark:bg-gray-800 text-gray-300'
-                      }`}
-                    >
+                      }`}>
                       {dayNum}
                       {!isUnlocked && !isPro && (mNum > 1 || dayNum > 1) && (
                         <div className="absolute -top-1 -right-1">
@@ -709,8 +691,10 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
         <AnimatePresence>
           {showLockModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowLockModal(false)} />
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="relative bg-white dark:bg-[#1F2937] rounded-[2.5rem] p-8 max-w-md w-full text-center space-y-6">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowLockModal(false)} />
+              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                className="relative bg-white dark:bg-[#1F2937] rounded-[2.5rem] p-8 max-w-md w-full text-center space-y-6">
                 <div className="w-20 h-20 bg-amber-50 dark:bg-amber-900/20 rounded-3xl flex items-center justify-center mx-auto text-amber-500">
                   <Shield size={40} />
                 </div>
@@ -725,28 +709,25 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
     );
   }
 
-  // 3. PRACTICE TASKS VIEW (DISPLAYING DYNAMICALLY 20 TO 30 QUESTIONS)
+  // ============================================================
+  // PRACTICE VIEW
+  // ============================================================
   if (view === 'practice' && dailyTasks && currentSubTask) {
     return (
       <div className="max-w-4xl mx-auto space-y-8 relative">
         <div className="flex items-center justify-between">
           <button onClick={() => setView('roadmap')} className="flex items-center gap-2 text-[#6B7280] dark:text-gray-400 hover:text-[#111827] dark:hover:text-white transition-colors cursor-pointer">
-            <ChevronLeft size={20} />
-            Back to Roadmap
+            <ChevronLeft size={20} /> Back to Roadmap
           </button>
-          
           <div className="text-right flex items-center gap-4">
-            <div className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-xs text-[#4F46E5] dark:text-indigo-400 flex items-center gap-1.5 shadow-sm">
+            <div className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-xs text-[#4F46E5] flex items-center gap-1.5">
               <span>Question</span>
-              <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
-                {getCurrentQuestionNumber()}
-              </span>
+              <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">{getCurrentQuestionNumber()}</span>
               <span className="text-gray-400">/</span>
               <span>{getTotalQuestionsCount()}</span>
             </div>
-
             <div>
-              <p className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 uppercase tracking-wider">Month {selectedMonth} • Day {selectedDay}</p>
+              <p className="text-xs font-bold text-[#4F46E5] uppercase tracking-wider">Month {selectedMonth} • Day {selectedDay}</p>
               <h3 className="text-lg font-bold text-[#111827] dark:text-white">
                 {taskType === 'sentences' ? 'Speaking Practice' : taskType === 'translations' ? 'Translation Practice' : taskType === 'arrangements' ? 'Sentence Arrangement' : 'Multiple Choice'}
               </h3>
@@ -758,10 +739,8 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           <div className="p-10 flex-1 flex flex-col">
             <div className="flex items-center gap-4 mb-10">
               <div className="flex-1 h-2 bg-[#F3F4F6] dark:bg-gray-800 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-[#4F46E5] dark:bg-indigo-400 transition-all duration-500"
-                  style={{ width: `${(getCurrentQuestionNumber() / getTotalQuestionsCount()) * 100}%` }}
-                ></div>
+                <div className="h-full bg-[#4F46E5] transition-all duration-500"
+                  style={{ width: `${(getCurrentQuestionNumber() / getTotalQuestionsCount()) * 100}%` }} />
               </div>
               <span className="text-xs font-bold text-[#111827] dark:text-white">
                 {Math.round((getCurrentQuestionNumber() / getTotalQuestionsCount()) * 100)}%
@@ -771,13 +750,13 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
             <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8">
               {taskType === 'sentences' ? (
                 <>
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] dark:text-indigo-400 rounded-full cursor-pointer hover:scale-110 transition-transform" onClick={() => currentSubTask?.english && handleSpeak(currentSubTask.english)}>
+                  <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 text-[#4F46E5] rounded-full cursor-pointer hover:scale-110 transition-transform"
+                    onClick={() => currentSubTask?.english && handleSpeak(currentSubTask.english)}>
                     <Volume2 size={32} />
                   </div>
                   <h3 className="text-3xl font-bold text-[#111827] dark:text-white leading-tight">"{currentSubTask?.english || '...'}"</h3>
-                  <button onClick={() => setShowTranslation(!showTranslation)} className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer">
-                    <Languages size={12} />
-                    {showTranslation ? 'Hide Meaning' : 'Show Meaning'}
+                  <button onClick={() => setShowTranslation(!showTranslation)} className="text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1 cursor-pointer">
+                    <Languages size={12} /> {showTranslation ? 'Hide Meaning' : 'Show Meaning'}
                   </button>
                   <button onClick={toggleRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-[#4F46E5]'}`}>
                     <Mic size={32} className="text-white" />
@@ -795,83 +774,49 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
               ) : taskType === 'arrangements' ? (
                 <div className="w-full max-w-xl space-y-8">
                   <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50 space-y-4">
-                    <p className="text-xs font-bold text-[#6B7280] dark:text-gray-400 uppercase tracking-wider">Arrange words matching this meaning:</p>
+                    <p className="text-xs font-bold text-[#6B7280] uppercase tracking-wider">Arrange words matching this meaning:</p>
                     <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask?.translation}</h3>
                   </div>
-
                   <div className="min-h-[60px] p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 items-center justify-center">
                     {userArrangement.map((word, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          setUserArrangement(userArrangement.filter((_, idx) => idx !== i));
-                          setFeedback({ status: null, text: '' });
-                          setShowTranslation(false);
-                        }}
-                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-xl font-bold shadow-sm hover:bg-indigo-600 transition-all cursor-pointer"
-                      >
+                      <button key={i} onClick={() => { setUserArrangement(userArrangement.filter((_, idx) => idx !== i)); setFeedback({ status: null, text: '' }); setShowTranslation(false); }}
+                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-xl font-bold hover:bg-indigo-600 transition-all cursor-pointer">
                         {word}
                       </button>
                     ))}
-                    {userArrangement.length === 0 && (
-                      <span className="text-gray-400 text-sm italic">Tap words below to arrange...</span>
-                    )}
+                    {userArrangement.length === 0 && <span className="text-gray-400 text-sm italic">Tap words below to arrange...</span>}
                   </div>
-
                   <div className="flex flex-wrap gap-2 justify-center">
                     {(() => {
-                      const availableWords = [...(currentSubTask?.jumbled || [])];
-                      userArrangement.forEach(word => {
-                        const index = availableWords.indexOf(word);
-                        if (index !== -1) availableWords.splice(index, 1);
-                      });
-
-                      return availableWords.map((word, i) => (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            setUserArrangement([...userArrangement, word]);
-                            setFeedback({ status: null, text: '' });
-                            setShowTranslation(false);
-                          }}
-                          className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl font-bold text-[#111827] dark:text-white hover:border-[#4F46E5] transition-all cursor-pointer"
-                        >
+                      const avail = [...(currentSubTask?.jumbled || [])];
+                      userArrangement.forEach(w => { const idx = avail.indexOf(w); if (idx !== -1) avail.splice(idx, 1); });
+                      return avail.map((word, i) => (
+                        <button key={i} onClick={() => { setUserArrangement([...userArrangement, word]); setFeedback({ status: null, text: '' }); setShowTranslation(false); }}
+                          className="px-4 py-2 bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-xl font-bold text-[#111827] dark:text-white hover:border-[#4F46E5] transition-all cursor-pointer">
                           {word}
                         </button>
                       ));
                     })()}
                   </div>
-
                   <div className="flex justify-center gap-4">
-                    <button 
-                      onClick={() => {
-                        setUserArrangement([]);
-                        setFeedback({ status: null, text: '' });
-                        setShowTranslation(false);
-                      }}
-                      className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 flex items-center gap-1 cursor-pointer"
-                    >
+                    <button onClick={() => { setUserArrangement([]); setFeedback({ status: null, text: '' }); setShowTranslation(false); }}
+                      className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 flex items-center gap-1 cursor-pointer">
                       <RefreshCw size={14} /> Reset
                     </button>
-                    <button 
-                      onClick={handleCheckArrangement}
-                      disabled={userArrangement.length === 0}
-                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50 transition-all cursor-pointer"
-                    >
+                    <button onClick={handleCheckArrangement} disabled={userArrangement.length === 0}
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50 transition-all cursor-pointer">
                       Check Answer
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="w-full max-w-xl space-y-8">
-                  <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50 space-y-4">
+                  <div className="bg-indigo-50 dark:bg-indigo-900/30 p-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/50">
                     <h3 className="text-2xl font-bold text-[#111827] dark:text-white">{currentSubTask?.question}</h3>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
                     {currentSubTask?.options?.map((option: string, i: number) => (
-                      <button
-                        key={i}
-                        disabled={selectedOption !== null}
+                      <button key={i} disabled={selectedOption !== null}
                         onClick={() => handleOptionSelect(option, currentSubTask.answer, currentSubTask.explanation)}
                         className={`w-full text-left p-4 rounded-2xl border transition-all font-medium cursor-pointer ${
                           selectedOption === option
@@ -879,8 +824,7 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                               ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
                               : 'bg-red-50 border-red-500 text-red-700 dark:bg-red-950/30 dark:text-red-300'
                             : 'bg-white dark:bg-[#1F2937] border-[#E5E7EB] dark:border-gray-700 hover:border-[#4F46E5] text-[#111827] dark:text-white'
-                        }`}
-                      >
+                        }`}>
                         {option}
                       </button>
                     ))}
@@ -888,38 +832,26 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 </div>
               )}
 
-              {/* Translation Solution Box */}
               <AnimatePresence>
                 {(showTranslation || feedback.status) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    className="w-full max-w-xl p-5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-left space-y-3 shadow-sm"
-                  >
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                    className="w-full max-w-xl p-5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-left space-y-3 shadow-sm">
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                      <Languages size={16} />
-                      <span>Full Translation Solution</span>
+                      <Languages size={16} /> <span>Full Translation Solution</span>
                     </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                       <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
                         <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">{targetLanguage} Meaning:</span>
-                        <p className="font-semibold text-gray-800 dark:text-gray-200">
-                          {currentSubTask?.translation || currentSubTask?.native || 'N/A'}
-                        </p>
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">{currentSubTask?.translation || currentSubTask?.native || 'N/A'}</p>
                       </div>
-
                       <div className="p-3 bg-white dark:bg-[#1F2937] rounded-xl border border-indigo-100 dark:border-indigo-900/40">
                         <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Correct English:</span>
                         <div className="flex items-center justify-between">
                           <p className="font-bold text-indigo-700 dark:text-indigo-300">
                             {currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer || 'N/A'}
                           </p>
-                          <button 
-                            onClick={() => handleSpeak(currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer)}
-                            className="p-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 rounded-lg cursor-pointer"
-                          >
+                          <button onClick={() => handleSpeak(currentSubTask?.english || currentSubTask?.correct || currentSubTask?.answer)}
+                            className="p-1 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/50 rounded-lg cursor-pointer">
                             <Volume2 size={16} />
                           </button>
                         </div>
@@ -929,30 +861,22 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
                 )}
               </AnimatePresence>
 
-              {/* Feedback Alert Status */}
               <AnimatePresence>
                 {feedback.status && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
+                  <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
                     className={`w-full max-w-xl flex items-center justify-between gap-3 px-6 py-4 rounded-2xl border ${
-                      feedback.status === 'correct' 
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300' 
+                      feedback.status === 'correct'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300'
                         : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300'
-                    }`}
-                  >
+                    }`}>
                     <div className="flex items-center gap-3">
                       {feedback.status === 'correct' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
                       <span className="font-semibold text-sm">{feedback.text}</span>
                     </div>
-
                     {feedback.status === 'incorrect' && (
-                      <button 
-                        onClick={handleRetake}
-                        className="flex items-center gap-1 bg-amber-200 dark:bg-amber-900/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-300 transition-colors shrink-0 cursor-pointer"
-                      >
-                        <RefreshCw size={14} />
-                        Retake
+                      <button onClick={handleRetake}
+                        className="flex items-center gap-1 bg-amber-200 dark:bg-amber-900/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-300 transition-colors shrink-0 cursor-pointer">
+                        <RefreshCw size={14} /> Retake
                       </button>
                     )}
                   </motion.div>
@@ -962,97 +886,56 @@ export default function Practice({ isDarkMode, onThemeToggle, userEmail, userNam
           </div>
 
           <div className="bg-[#F9FAFB] dark:bg-gray-800/50 p-6 border-t border-[#E5E7EB] dark:border-gray-700 flex items-center justify-end">
-            <button 
-              onClick={nextSubTask}
-              disabled={feedback.status !== 'correct'}
+            <button onClick={nextSubTask} disabled={feedback.status !== 'correct'}
               className={`px-10 py-3 rounded-xl font-bold flex items-center gap-2 transition-all ${
-                feedback.status === 'correct' 
-                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black dark:hover:bg-indigo-700 shadow-lg shadow-gray-200 dark:shadow-none cursor-pointer' 
+                feedback.status === 'correct'
+                  ? 'bg-[#111827] dark:bg-indigo-600 text-white hover:bg-black dark:hover:bg-indigo-700 shadow-lg cursor-pointer'
                   : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              Next Task
-              <ArrowRight size={18} />
+              }`}>
+              Next Task <ArrowRight size={18} />
             </button>
           </div>
         </div>
 
-        {/* DAILY TASK COMPLETION CONGRATULATORY POPUP MODAL */}
         <AnimatePresence>
           {showCompletionModal && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
-            >
-              <motion.div 
-                initial={{ scale: 0.8, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.8, y: 20 }}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4">
+              <motion.div initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.8, y: 20 }}
                 transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                className="bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl relative overflow-hidden"
-              >
-                <div className="absolute top-[-30%] left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
-
+                className="bg-white dark:bg-[#1F2937] border border-[#E5E7EB] dark:border-gray-700 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl relative overflow-hidden">
+                <div className="absolute top-[-30%] left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="relative mx-auto w-24 h-24 mb-6">
-                  <motion.div 
-                    animate={{ rotate: [0, 10, -10, 0] }}
-                    transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
-                    className="w-full h-full bg-gradient-to-tr from-amber-400 to-amber-200 rounded-3xl flex items-center justify-center shadow-lg shadow-amber-200 dark:shadow-none"
-                  >
+                  <motion.div animate={{ rotate: [0, 10, -10, 0] }} transition={{ repeat: Infinity, duration: 2 }}
+                    className="w-full h-full bg-gradient-to-tr from-amber-400 to-amber-200 rounded-3xl flex items-center justify-center shadow-lg">
                     <Trophy size={48} className="text-amber-900" />
                   </motion.div>
                   <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-1.5 rounded-full border-2 border-white dark:border-gray-800">
                     <CheckCircle2 size={18} />
                   </div>
                 </div>
-
-                <h3 className="text-2xl font-bold text-[#111827] dark:text-white mb-2">
-                  Daily Goal Accomplished! 🎉
-                </h3>
+                <h3 className="text-2xl font-bold text-[#111827] dark:text-white mb-2">Daily Goal Accomplished! 🎉</h3>
                 <p className="text-sm text-[#6B7280] dark:text-gray-400 mb-6 leading-relaxed">
-                  Great job! You have completed Month {selectedMonth} Day {selectedDay} tasks. Keep up the momentum to build fluency!
+                  Great job! You completed Month {selectedMonth} Day {selectedDay}. Keep going!
                 </p>
-
                 <div className="grid grid-cols-2 gap-3 mb-6">
                   <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 text-left">
-                    <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider mb-1">
-                      <Zap size={14} /> Streak
-                    </div>
+                    <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs uppercase mb-1"><Zap size={14} /> Streak</div>
                     <p className="text-lg font-extrabold text-indigo-900 dark:text-indigo-100">+1 Day Streak</p>
                   </div>
-
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 text-left">
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-wider mb-1">
-                      <Award size={14} /> Progress
-                    </div>
+                    <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-xs uppercase mb-1"><Award size={14} /> Progress</div>
                     <p className="text-lg font-extrabold text-emerald-900 dark:text-emerald-100">Task Completed</p>
                   </div>
                 </div>
-
                 <div className="flex flex-col gap-3">
-                  <button
-                    onClick={() => {
-                      setShowCompletionModal(false);
-                      setView('roadmap');
-                    }}
-                    className="w-full py-3.5 bg-[#4F46E5] hover:bg-indigo-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer"
-                  >
-                    Back to Roadmap
-                    <ArrowRight size={18} />
+                  <button onClick={() => { setShowCompletionModal(false); setView('roadmap'); }}
+                    className="w-full py-3.5 bg-[#4F46E5] hover:bg-indigo-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer">
+                    Back to Roadmap <ArrowRight size={18} />
                   </button>
-
-                  <button
-                    onClick={() => {
-                      setShowCompletionModal(false);
-                      setTaskType('sentences');
-                      setTaskIndex(0);
-                    }}
-                    className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-300 rounded-2xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <RotateCcw size={16} />
-                    Practice Again
+                  <button onClick={() => { setShowCompletionModal(false); setTaskType('sentences'); setTaskIndex(0); }}
+                    className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-[#6B7280] dark:text-gray-300 rounded-2xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                    <RotateCcw size={16} /> Practice Again
                   </button>
                 </div>
               </motion.div>
